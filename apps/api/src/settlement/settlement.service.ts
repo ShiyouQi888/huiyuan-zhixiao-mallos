@@ -118,7 +118,8 @@ export class SettlementService {
     const [perf, users] = await Promise.all([
       this.prisma.orderPerformance.findMany({ where: { occurDate: date } }),
       this.prisma.user.findMany({
-        where: { status: { not: 2 } },
+        // 平台账号（超管/运营/财务/客服）不参与计酬与业绩归集
+        where: { status: { not: 2 }, role: 'MEMBER' },
         select: { id: true, parentId: true, depth: true, rankLevel: true, equityStatus: true, peerBonusLocked: true },
       }),
     ]);
@@ -196,7 +197,7 @@ export class SettlementService {
     const ranks = await this.prisma.rank.findMany({ orderBy: { level: 'asc' } });
     const [network, users] = await Promise.all([
       this.prisma.orderPerformance.aggregate({ where: { occurDate: date }, _sum: { amount: true } }),
-      this.prisma.user.findMany({ where: { status: { not: 2 } }, select: { rankId: true } }),
+      this.prisma.user.findMany({ where: { status: { not: 2 }, role: 'MEMBER' }, select: { rankId: true } }),
     ]);
     const g = network._sum.amount ?? 0n;
 
@@ -247,7 +248,8 @@ export class SettlementService {
   /** Step7: 团队奖 = 自己伞下当日新增业绩 × 自己费率 */
   private async step7TeamBonus(date: Date): Promise<void> {
     const ranks = await this.prisma.rank.findMany();
-    const rateMap = new Map(ranks.map((r) => [r.id, Number(r.teamRate)]));
+    // 按 level 建索引：teamPerformance 存的是 rankLevel，与 rank.id 无必然关系
+    const rateMap = new Map(ranks.map((r) => [r.level, Number(r.teamRate)]));
     const rows = await this.prisma.teamPerformance.findMany({
       where: { statDate: date, rankLevel: { gt: 0 } },
       include: { user: { select: { equityStatus: true } } },
@@ -270,7 +272,7 @@ export class SettlementService {
   /** Step8: 平级奖（历史锁定）+ 领导奖，按 depth 从深到浅 */
   private async step8PeerLeader(date: Date): Promise<void> {
     const ranks = await this.prisma.rank.findMany();
-    const rateMap = new Map(ranks.map((r) => [r.id, Number(r.teamRate)]));
+    const rateMap = new Map(ranks.map((r) => [r.level, Number(r.teamRate)]));
     const peerRate = await this.config.getNumber('bonus.peer_rate', 1.0);
     const leaderRate = await this.config.getNumber('bonus.leader_rate', 0.5);
 
@@ -356,7 +358,7 @@ export class SettlementService {
       if (share <= 0n) continue; // 人数为 0 时不除零，池子沉淀为平台留存
 
       const users = await this.prisma.user.findMany({
-        where: { rankId: rank.id, equityStatus: 0, status: 0 },
+        where: { rankId: rank.id, equityStatus: 0, status: 0, role: 'MEMBER' },
         select: { id: true },
       });
       for (const u of users) {

@@ -14,7 +14,8 @@
     "prisma:seed": "ts-node prisma/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "ts-node scripts/smoke.ts"
+    "test:smoke": "ts-node scripts/smoke.ts",
+    "test:e2e": "ts-node scripts/e2e-full.ts"
   },
   "dependencies": {
     "@solar/shared": "workspace:*",

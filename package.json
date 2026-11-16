@@ -20,7 +20,8 @@
     "dev:partner": "pnpm --filter @solar/partner dev:h5",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "smoke": "pnpm --filter @solar/api test:smoke"
+    "smoke": "pnpm --filter @solar/api test:smoke",
+    "e2e": "pnpm --filter @solar/api test:e2e"
   },
   "devDependencies": {
     "typescript": "^5.6.3"
