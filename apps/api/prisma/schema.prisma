@@ -53,6 +53,8 @@ model User {
 
   /// 0 正常 1 冻结 2 注销
   status               Int       @default(0) @db.SmallInt
+  /// 修改登录凭据后递增，撤销已有登录会话
+  authVersion          Int       @default(0)
   /// SUPER_ADMIN / OPERATOR / FINANCE / SUPPORT / MEMBER
   role                 String    @default("MEMBER") @db.VarChar(32)
   /// 账号级页面权限；未自定义时按角色默认权限执行
@@ -397,7 +399,7 @@ model BonusPlan {
   dailyAmount     BigInt
   periods         Int      @default(20)
   releasedAmount  BigInt   @default(0)
-  /// PENDING / RELEASING / COMPLETED
+  /// PENDING / RELEASING / COMPLETED / CANCELLED
   status          String   @default("PENDING") @db.VarChar(16)
   startAt         DateTime
   createdAt       DateTime @default(now())
@@ -417,7 +419,7 @@ model BonusStage {
   amount      BigInt
   dueAt       DateTime
   releasedAt  DateTime?
-  /// PENDING / RELEASED
+  /// PENDING / RELEASED / CANCELLED
   status      String   @default("PENDING") @db.VarChar(16)
 
   plan        BonusPlan     @relation(fields: [planId], references: [id])
@@ -475,7 +477,7 @@ model TeamPerformance {
 // ============================================================
 
 model Rank {
-  id          Int      @id
+  id          Int      @id @default(autoincrement())
   name        String   @db.VarChar(64)
   level       Int      @unique
   /// 团队累计业绩门槛（元）
@@ -485,6 +487,8 @@ model Rank {
   /// 分红池比例
   poolRate    Decimal  @db.Decimal(5, 4)
   sort        Int      @default(0)
+  /// 0 停用 1 启用；停用后不再自动晋升，现有持有人保留既有结算规则
+  status      Int      @default(1) @db.SmallInt
 
   users       User[]
   snapshots   RankSnapshot[]

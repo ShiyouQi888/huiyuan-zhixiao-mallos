@@ -22,7 +22,13 @@ const CATEGORIES = [
   { value: 'CATEGORY', label: '分类图标' },
   { value: 'AVATAR', label: '头像' },
   { value: 'OTHER', label: '其他' },
+  { value: 'UNREFERENCED', label: '未引用' },
 ];
+
+/** 这些分类仅用于筛选，不能作为上传分类 */
+const UPLOADABLE_CATEGORIES = CATEGORIES.filter(
+  (item) => item.value !== 'ALL' && item.value !== 'UNREFERENCED',
+);
 
 type CropQueue = { files: File[]; index: number; preset: ProductImagePreset };
 
@@ -55,8 +61,10 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
     const q = new URLSearchParams({ category, page: '1' });
     if (keyword) q.set('keyword', keyword);
     try {
-      const result = await api<{ list: FileItem[] }>(`/admin/files?${q}`);
-      setFiles(result.list ?? []);
+      const result = category === 'UNREFERENCED'
+        ? await api<FileItem[]>('/admin/files/unreferenced')
+        : await api<{ list: FileItem[] }>(`/admin/files?${q}`);
+      setFiles(Array.isArray(result) ? result : (result.list ?? []));
     } catch (error: any) {
       notify(error.message ?? '文件列表加载失败', 'error');
     }
@@ -184,7 +192,7 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
             {!picker && (
               <Field label="文件分类" className="mb-3">
                 <select className="admin-select" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)}>
-                  {CATEGORIES.filter((item) => item.value !== 'ALL').map((item) => (
+                  {UPLOADABLE_CATEGORIES.map((item) => (
                     <option key={item.value} value={item.value}>{item.label}</option>
                   ))}
                 </select>

@@ -38,17 +38,17 @@ async function api<T = any>(
 async function main(): Promise<void> {
   console.log('=== 太阳线会员系统 · 烟雾测试 ===\n');
 
-  // 1. 档位列表
+  // 1. 档位列表（需登录态，先登录管理员）
   console.log('[1] 档位与功能开关');
-  const packages = await api<any[]>('/api/packages');
-  check('档位数量为 4', packages.length === 4, packages.length);
-  check('金卡价格 5000 / 权益值 15000', packages[1].price === 5000 && packages[1].equityValue === 15000);
-
   const admin = await api<{ token: string }>('/api/auth/login', {
     method: 'POST',
     body: { phone: '13800138000', password: '123456' },
   });
   check('管理员登录成功', !!admin.token);
+
+  const packages = await api<any[]>('/api/packages', { token: admin.token });
+  check('档位数量为 4', packages.length === 4, packages.length);
+  check('金卡价格 5000 / 权益值 15000', packages[1].price === 5000 && packages[1].equityValue === 15000);
 
   const adminMe = await api<any>('/api/me', { token: admin.token });
   const features = await api<{ features: any[] }>('/api/features?platform=h5', { token: admin.token });
@@ -73,15 +73,19 @@ async function main(): Promise<void> {
   const team = await api<any[]>('/api/me/team', { token: parent.token });
   check('直属下级包含新注册用户', team.some((u) => u.phone === childPhone));
 
-  // 3. 下级购买金卡（无权益值/余额，全额现金）
+  // 3. 下级购买金卡（管理端授予权益值后全额抵扣，系统无现金支付通道）
   console.log('\n[3] 下单与权益值发放');
+  const childInfo = await api<any>('/api/me', { token: child.token });
+  await api(`/api/admin/equity/${childInfo.id}/adjust`, {
+    method: 'POST', token: admin.token, body: { amount: 5000, reason: '烟雾测试授予购卡权益值' },
+  });
   const order = await api<any>('/api/orders', {
     method: 'POST',
     token: child.token,
-    body: { type: 1, packageId: 2, useEquity: false, useBalance: false },
+    body: { type: 1, packageId: 2, useEquity: true, useBalance: false },
   });
   check('订单已付款并等待管理端交付（status=1）', order.status === 1, order.status);
-  check('订单金额 5000 全额现金', order.amount === 5000 && order.cashPay === 5000, order);
+  check('订单金额 5000 全额权益值抵扣', order.amount === 5000 && order.equityDeduct === 5000 && order.cashPay === 0, order);
 
   await api(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
     method: 'POST', token: admin.token,
@@ -143,6 +147,53 @@ async function main(): Promise<void> {
     method: 'POST', token: admin.token, body: { date: perfDate },
   });
   check('5 项对账恒等式全部成立', recon.allPassed === true, recon.checks);
+
+  // 7. 收益周期汇总与明细分页
+  console.log('\n[7] 收益汇总与分页');
+  const periods = await api<any>('/api/me/bonus/periods', { token: parent.token });
+  check('今日/本月汇总结构完整', periods.today && periods.month && typeof periods.today.amount === 'number', periods);
+  check('本月汇总含直推奖金额', periods.month.amount >= 250, periods.month.amount);
+
+  const paged = await api<any>('/api/me/bonus/records?page=1', { token: parent.token });
+  check('明细分页返回 page/pageSize', paged.page === 1 && paged.pageSize === 20, paged);
+
+  const filtered = await api<any>('/api/me/bonus/records?type=1&page=1', { token: parent.token });
+  check('按类型筛选仅返回直推奖', filtered.list.every((r: any) => r.type === 1), filtered.list);
+
+  // 8. 会员间转账：发起 → 查询 → 确认接收
+  console.log('\n[8] 钱包转账与确认接收');
+  await api('/api/me/realname', {
+    method: 'POST', token: parent.token, body: { realName: '烟雾测试', idCard: '110101199001010011' },
+  });
+  await api('/api/me/transfer-password', {
+    method: 'POST', token: parent.token, body: { newPassword: '123456' },
+  });
+  const transfer = await api<any>('/api/me/wallet/transfers', {
+    method: 'POST', token: parent.token,
+    body: { toPhone: childPhone, amount: 10, paymentPassword: '123456' },
+  });
+  check('转账已发起且状态为待确认', transfer.status === 'PENDING', transfer);
+
+  const fromList = await api<any>('/api/me/transfers/wallet?page=1', { token: parent.token });
+  const pending = fromList.list.find((t: any) => t.transferNo === transfer.transferNo);
+  check('转出方查询到待确认转账', !!pending && pending.status === 'PENDING', fromList.list);
+  check('转账记录带对方手机号', pending?.toUser?.phone === childPhone, pending?.toUser);
+
+  const toList = await api<any>('/api/me/transfers/wallet?page=1', { token: child.token });
+  const incoming = toList.list.find((t: any) => t.transferNo === transfer.transferNo);
+  check('接收方查询到待确认转账', !!incoming && incoming.status === 'PENDING', toList.list);
+  check('接收方记录带对方手机号', incoming?.fromUser?.phone === parentPhone, incoming?.fromUser);
+
+  await api(`/api/me/wallet/transfers/${incoming.id}/accept`, { method: 'POST', token: child.token });
+  const childWallet = await api<any>('/api/me/wallet', { token: child.token });
+  check('确认接收后下级余额 +10', childWallet.balance === 10, childWallet.balance);
+
+  const parentWalletAfter = await api<any>('/api/me/wallet', { token: parent.token });
+  check('转出方余额 175-10 = 165', parentWalletAfter.balance === 165, parentWalletAfter.balance);
+
+  const toListAfter = await api<any>('/api/me/transfers/wallet?page=1', { token: child.token });
+  const done = toListAfter.list.find((t: any) => t.transferNo === transfer.transferNo);
+  check('确认后转账状态为已到账', done?.status === 'COMPLETED', done?.status);
 
   console.log(`\n=== 结果：通过 ${passed} 项，失败 ${failed}项 ===`);
   if (failed > 0) process.exit(1);

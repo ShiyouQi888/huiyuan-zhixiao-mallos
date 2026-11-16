@@ -80,6 +80,15 @@ export class AdminController {
     );
   }
 
+  @Get('members/options/ranks')
+  @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE', 'SUPPORT')
+  memberRankOptions() {
+    return this.prisma.rank.findMany({
+      orderBy: { level: 'asc' },
+      select: { level: true, name: true, status: true },
+    });
+  }
+
   @Get('members/:id/team')
   @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE', 'SUPPORT')
   memberTeam(@Param('id') id: string) {
@@ -98,8 +107,8 @@ export class AdminController {
 
   @Post('members/:id/freeze')
   @Roles('SUPER_ADMIN', 'OPERATOR')
-  freeze(@Param('id') id: string, @Body() body: { frozen: boolean }) {
-    return this.users.freeze(BigInt(id), !!body.frozen);
+  freeze(@Param('id') id: string, @Body() body: { frozen: boolean }, @CurrentUser() user: CurrentUserPayload) {
+    return this.users.freeze(BigInt(id), !!body.frozen, user.id);
   }
 
   @Get('orders')

@@ -1,7 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { BonusService } from '../bonus/bonus.service';
 import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
-import { Public } from '../auth/public.decorator';
 import { Err } from '../common/business.exception';
 import { EquityService } from '../equity/equity.service';
 import { FeaturesService } from '../features/features.service';
@@ -28,10 +27,11 @@ export class MemberController {
     private readonly features: FeaturesService,
   ) {}
 
-  @Public()
   @Get('packages')
-  async packages() {
-    await this.features.assertEnabled('package.purchase', 'h5', 0);
+  async packages(@CurrentUser() current: CurrentUserPayload) {
+    const enabled = await Promise.all(['package.purchase', 'member.upgrade', 'member.repurchase']
+      .map((code) => this.features.isAvailable(code, 'h5', current.rankLevel)));
+    if (!enabled.some(Boolean)) throw Err.featureDisabled('礼包购买、升级与复消当前均不可用');
     return this.prisma.package.findMany({ where: { status: 1 }, orderBy: { level: 'asc' } });
   }
 
@@ -136,6 +136,13 @@ export class MemberController {
     await this.features.assertEnabled('bonus.detail', 'h5', current.rankLevel);
     const includeDividend = await this.features.isAvailable('rank.dividend', 'h5', current.rankLevel);
     return this.bonus.summary(current.id, includeDividend);
+  }
+
+  @Get('me/bonus/periods')
+  async bonusPeriods(@CurrentUser() current: CurrentUserPayload) {
+    await this.features.assertEnabled('bonus.detail', 'h5', current.rankLevel);
+    const includeDividend = await this.features.isAvailable('rank.dividend', 'h5', current.rankLevel);
+    return this.bonus.periodSummary(current.id, includeDividend);
   }
 
   @Get('me/bonus/records')

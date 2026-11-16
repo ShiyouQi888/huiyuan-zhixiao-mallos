@@ -210,15 +210,20 @@ export class TransferService {
 
   async listTransfers(userId: bigint, platform: 'wallet' | 'equity', page = 1, pageSize = 20) {
     const where = { OR: [{ fromUserId: userId }, { toUserId: userId }] };
+    const include = {
+      fromUser: { select: { id: true, phone: true, nickname: true } },
+      toUser: { select: { id: true, phone: true, nickname: true } },
+    };
+    const take = { orderBy: { createdAt: 'desc' as const }, skip: (page - 1) * pageSize, take: pageSize, include };
     if (platform === 'wallet') {
       const [list, total] = await Promise.all([
-        this.prisma.walletTransfer.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+        this.prisma.walletTransfer.findMany({ where, ...take }),
         this.prisma.walletTransfer.count({ where }),
       ]);
       return { list, total, page, pageSize };
     }
     const [list, total] = await Promise.all([
-      this.prisma.equityTransfer.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.equityTransfer.findMany({ where, ...take }),
       this.prisma.equityTransfer.count({ where }),
     ]);
     return { list, total, page, pageSize };

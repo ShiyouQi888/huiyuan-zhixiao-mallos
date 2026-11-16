@@ -10,13 +10,24 @@ import { Award, ArrowUpRight, Check, History } from 'lucide-vue-next';
 const rank = ref<any>(null);
 const logs = ref<any[]>([]);
 const loading = ref(true);
+const logPage = ref(1);
+const logTotal = ref(0);
+const logPageSize = 20;
 const isTopRank = computed(() => Boolean(rank.value) && rank.value.nextRank === null);
+const logPages = computed(() => Math.max(1, Math.ceil(logTotal.value / logPageSize)));
 
 const progress = computed(() => {
   const current = rank.value;
   if (!current?.nextRank?.threshold) return 0;
   return Math.min(100, (Number(current.totalPerformance ?? 0) / Number(current.nextRank.threshold)) * 100);
 });
+
+async function loadLogs(page = logPage.value) {
+  logPage.value = page;
+  const result = await api<any>(`/me/rank/logs?page=${page}`).catch(() => null);
+  logs.value = result?.list ?? [];
+  logTotal.value = result?.total ?? 0;
+}
 
 onMounted(async () => {
   const [rankResult, logResult] = await Promise.all([
@@ -25,6 +36,7 @@ onMounted(async () => {
   ]);
   rank.value = rankResult;
   logs.value = logResult?.list ?? [];
+  logTotal.value = logResult?.total ?? 0;
   loading.value = false;
 });
 
@@ -116,7 +128,7 @@ function formatDate(value: string) {
         </div>
       </div>
 
-      <SectionHeading title="等级变更记录" subtitle="晋升与人工调整都会留痕" />
+      <SectionHeading title="等级变更记录" :subtitle="`晋升与人工调整都会留痕 · 共 ${logTotal} 条`" />
       <div v-if="logs.length" class="card card--list">
         <div v-for="log in logs" :key="log.id" class="history-row">
           <span class="history-icon"><History :size="15" aria-hidden="true" /></span>
@@ -137,8 +149,20 @@ function formatDate(value: string) {
         description="达成晋升门槛或管理员调整职级后，记录会出现在这里"
         :icon="History"
       />
+
+      <div v-if="logPages > 1" class="rank-pager">
+        <button type="button" :disabled="logPage <= 1" @click="loadLogs(logPage - 1)">上一页</button>
+        <span>{{ logPage }} / {{ logPages }} · 共 {{ logTotal }} 条</span>
+        <button type="button" :disabled="logPage >= logPages" @click="loadLogs(logPage + 1)">下一页</button>
+      </div>
     </template>
 
     <div v-else class="card rank-loading">等级信息暂时无法加载，请稍后重试。</div>
   </main>
 </template>
+
+<style scoped>
+.rank-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; color: var(--muted, #8b909c); font-size: 10.5px; }
+.rank-pager button { min-height: 26px; padding: 0 11px; border: 1px solid var(--line, rgba(17, 24, 39, 0.1)); border-radius: 8px; background: var(--surface, #fff); color: var(--text, #17181c); font: inherit; font-size: 10.5px; cursor: pointer; }
+.rank-pager button:disabled { opacity: .45; cursor: default; }
+</style>

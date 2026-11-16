@@ -37,9 +37,10 @@ export class EquityService {
     sourceId: string,
     expireAt: Date,
     bizType = 'equity_grant',
+    transaction?: Prisma.TransactionClient,
   ): Promise<{ lotId: bigint; expireAt: Date }> {
     if (amount <= 0n) throw new BusinessException(1003, '发放数量必须大于 0');
-    return this.prisma.$transaction(async (tx) => {
+    const apply = async (tx: Prisma.TransactionClient) => {
       const dup = await tx.equityTransaction.findFirst({ where: { bizType, bizId: sourceId, type: 1 } });
       if (dup?.lotId) return { lotId: dup.lotId, expireAt };
 
@@ -62,7 +63,8 @@ export class EquityService {
         data: { userId, type: 1, changeAmount: amount, balanceAfter, lotId: lot.id, bizType, bizId: sourceId },
       });
       return { lotId: lot.id, expireAt: lot.expireAt };
-    });
+    };
+    return transaction ? apply(transaction) : this.prisma.$transaction(apply);
   }
 
   /** FIFO 扣减：按到期日升序消耗批次，返回实际使用的批次（供转让继承到期日） */
@@ -72,9 +74,10 @@ export class EquityService {
     bizType: string,
     bizId: string,
     type = 2,
+    transaction?: Prisma.TransactionClient,
   ): Promise<LotUsage[]> {
     if (amount <= 0n) return [];
-    return this.prisma.$transaction(async (tx) => {
+    const apply = async (tx: Prisma.TransactionClient) => {
       const dupRows = await tx.equityTransaction.findMany({ where: { bizType, bizId, type } });
       if (dupRows.length) {
         const lotIds = dupRows.map((r) => r.lotId).filter((id): id is bigint => id !== null);
@@ -124,7 +127,8 @@ export class EquityService {
       });
       if (updated.count === 0) throw new BusinessException(3002, '权益值并发冲突，请重试');
       return used;
-    });
+    };
+    return transaction ? apply(transaction) : this.prisma.$transaction(apply);
   }
 
   /** 权益值转账转出：扣批次但记录原批次，待确认/超时分别处理 */

@@ -40,16 +40,17 @@ export function splitBonus(amount: bigint, cashRatio = 0.7): { cash: bigint; tok
 export function judgeRank(
   totalPerformance: bigint,
   currentRankId: number,
-  ranks: Array<{ id: number; level: number; threshold: bigint }>,
+  ranks: Array<{ id: number; level: number; threshold: bigint; status?: number }>,
 ): { rankId: number; level: number; changed: boolean } {
-  const eligible = [...ranks].sort((a, b) => a.level - b.level).reverse()
+  const current = ranks.find((rank) => rank.id === currentRankId);
+  const eligible = [...ranks].filter((rank) => rank.status === undefined || rank.status === 1).sort((a, b) => a.level - b.level).reverse()
     .find((r) => totalPerformance >= r.threshold);
-  const targetId = Math.max(currentRankId, eligible?.id ?? 0);
-  const target = ranks.find((r) => r.id === targetId);
+  const target = eligible && (!current || eligible.level > current.level) ? eligible : current;
+  const targetId = target?.id ?? currentRankId;
   return {
     rankId: targetId,
     level: target?.level ?? 0,
-    changed: targetId > currentRankId,
+    changed: targetId !== currentRankId,
   };
 }
 

@@ -22,12 +22,15 @@ export class OrderController {
     useBalance?: boolean;
     remark?: string;
   }) {
+    if (![1, 2, 3, 4].includes(body.type)) throw Err.param('订单类型不合法');
     // 按订单类型校验对应功能开关，防止绕过前端直接调用
     const flag = body.type === 4 ? 'product.mall'
       : body.type === 2 ? 'member.upgrade'
       : body.type === 3 ? 'member.repurchase'
       : 'package.purchase';
     await this.features.assertEnabled(flag, 'h5', current.rankLevel);
+    if (body.useEquity !== false) await this.features.assertEnabled('equity.account', 'h5', current.rankLevel);
+    if (body.useBalance !== false) await this.features.assertEnabled('wallet.account', 'h5', current.rankLevel);
 
     if (body.addressId !== undefined && !/^\d+$/.test(body.addressId)) throw Err.param('收货地址编号格式不正确');
     const params = {

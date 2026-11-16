@@ -45,6 +45,7 @@ const recommendedProducts = computed(() => {
   return products.value.filter((product) => !featuredIds.has(String(product.id))).slice(0, 4);
 });
 const greetingName = computed(() => store.profile?.nickname ?? '会员');
+const canManagePackages = computed(() => store.has('package.purchase') || store.has('member.upgrade') || store.has('member.repurchase'));
 
 async function load() {
   loading.value = true;
@@ -52,7 +53,7 @@ async function load() {
   await store.loadProfile().catch(() => {});
   const [productResult, packageResult] = await Promise.allSettled([
     api<any[]>('/products'),
-    store.has('package.purchase') ? api<any[]>('/packages') : Promise.resolve([]),
+    canManagePackages.value ? api<any[]>('/packages') : Promise.resolve([]),
   ]);
   products.value = productResult.status === 'fulfilled' ? productResult.value : [];
   packages.value = packageResult.status === 'fulfilled' ? packageResult.value : [];
@@ -128,8 +129,8 @@ function categoryTone(index: number) {
         <router-link to="/products" class="quick-item">
           <span class="quick-icon"><LayoutGrid :size="20" aria-hidden="true" /></span>全部商品
         </router-link>
-        <router-link v-if="store.has('package.purchase')" to="/packages" class="quick-item">
-          <span class="quick-icon quick-icon--gold"><Gift :size="20" aria-hidden="true" /></span>会员礼包
+        <router-link v-if="canManagePackages" to="/packages" class="quick-item">
+          <span class="quick-icon quick-icon--gold"><Gift :size="20" aria-hidden="true" /></span>会员礼包与升级
         </router-link>
         <router-link to="/orders" class="quick-item">
           <span class="quick-icon quick-icon--blue"><ClipboardList :size="20" aria-hidden="true" /></span>我的订单
@@ -183,8 +184,8 @@ function categoryTone(index: number) {
       </div>
     </section>
 
-    <section v-if="store.has('package.purchase') && packages.length">
-      <SectionHeading title="会员礼包" subtitle="选择等级，解锁对应权益" action-label="全部礼包" to="/packages" />
+    <section v-if="canManagePackages && packages.length">
+      <SectionHeading title="会员礼包与升级" subtitle="查看可购买、升级或复消的有效档位" action-label="全部礼包" to="/packages" />
       <div class="package-grid">
         <button v-for="(item, index) in packages.slice(0, 2)" :key="item.id" type="button"
           class="package-card package-card--home" :class="{ 'package-card--highlight': index === 1 }"

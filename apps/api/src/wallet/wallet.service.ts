@@ -14,8 +14,8 @@ export class WalletService {
     return tx.wallet.upsert({ where: { userId }, create: { userId }, update: {} });
   }
 
-  async get(userId: bigint) {
-    const wallet = await this.ensure(userId);
+  async get(userId: bigint, tx: Tx = this.prisma) {
+    const wallet = await this.ensure(userId, tx);
     return { ...wallet, available: wallet.balance - wallet.frozen };
   }
 
@@ -56,9 +56,10 @@ export class WalletService {
     bizType: string,
     bizId: string,
     remark?: string,
+    transaction?: Tx,
   ): Promise<WalletTransaction | null> {
     if (amount <= 0n) return null;
-    return this.prisma.$transaction(async (tx) => {
+    const apply = async (tx: Tx) => {
       const dup = await tx.walletTransaction.findUnique({
         where: { bizType_bizId: { bizType, bizId } },
       });
@@ -76,7 +77,8 @@ export class WalletService {
       return tx.walletTransaction.create({
         data: { userId, type: 2, changeAmount: -amount, balanceAfter, bizType, bizId, remark },
       });
-    });
+    };
+    return transaction ? apply(transaction) : this.prisma.$transaction(apply);
   }
 
   /** 转账发起：balance -= amount，frozen += amount */

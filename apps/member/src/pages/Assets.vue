@@ -17,12 +17,24 @@ const wallet = ref<any>(null);
 const equity = ref<any>(null);
 const token = ref<any>(null);
 const txs = ref<any[]>([]);
+const transfers = ref<any[]>([]);
+const transferTotal = ref(0);
+const transferPage = ref(1);
 const showTransfer = ref(false);
 const toPhone = ref('');
 const amount = ref('');
 const paymentPassword = ref('');
 const error = ref('');
 const busy = ref(false);
+const accepting = ref<string>('');
+
+const TRANSFER_STATUS: Record<string, string> = {
+  PENDING: '待确认',
+  COMPLETED: '已到账',
+  REJECTED: '已退回',
+  EXPIRED: '已过期',
+};
+const transferPages = computed(() => Math.max(1, Math.ceil(transferTotal.value / 20)));
 
 const allTabs = [
   { key: 'wallet' as const, label: '钱包余额', icon: WalletCards },
@@ -48,6 +60,42 @@ async function loadTx() {
   txs.value = (await api<any>(path).catch(() => null))?.list ?? [];
 }
 
+async function loadTransfers(page = transferPage.value) {
+  if (tab.value === 'token') { transfers.value = []; transferTotal.value = 0; return; }
+  if (!store.has(featureForTab[tab.value])) { transfers.value = []; transferTotal.value = 0; return; }
+  transferPage.value = page;
+  const platform = tab.value === 'wallet' ? 'wallet' : 'equity';
+  const result = await api<any>(`/me/transfers/${platform}?page=${page}`).catch(() => null);
+  transfers.value = result?.list ?? [];
+  transferTotal.value = result?.total ?? 0;
+}
+
+function isMe(id: unknown) {
+  return String(id) === String(store.profile?.id ?? '');
+}
+
+function counterpart(tx: any) {
+  const side = isMe(tx.fromUserId) ? tx.toUser : tx.fromUser;
+  return side?.nickname || side?.phone || '未知会员';
+}
+
+async function acceptTransfer(tx: any) {
+  if (accepting.value) return;
+  accepting.value = String(tx.id);
+  try {
+    const path = tab.value === 'wallet'
+      ? `/me/wallet/transfers/${tx.id}/accept`
+      : `/me/equity/transfers/${tx.id}/accept`;
+    await post(path);
+    Toast('已确认接收，资产到账', 'success');
+    await load();
+  } catch (e: any) {
+    Toast(e.message ?? '确认失败，请稍后重试', 'error');
+  } finally {
+    accepting.value = '';
+  }
+}
+
 async function load() {
   await store.loadProfile().catch(() => {});
   const [w, e, t] = await Promise.all([
@@ -56,13 +104,14 @@ async function load() {
     store.has('token.view') ? api<any>('/me/token').catch(() => null) : Promise.resolve(null),
   ]);
   wallet.value = w; equity.value = e; token.value = t;
-  await loadTx();
+  await Promise.all([loadTx(), loadTransfers(1)]);
 }
 
 function switchTab(next: AssetTab) {
   if (!store.has(featureForTab[next])) return;
   tab.value = next;
   loadTx();
+  loadTransfers(1);
 }
 
 async function transfer() {
@@ -150,6 +199,50 @@ onMounted(load);
     </div>
     <EmptyState v-else-if="tabs.length && tab !== 'token'" title="暂无交易流水" description="账户发生变动后，记录会显示在这里" />
 
+    <template v-if="tabs.length && tab !== 'token'">
+      <div class="asset-section-head">
+        <div><h2>{{ tab === 'wallet' ? '转账记录' : '转让记录' }}</h2><p>发起后需对方 24 小时内确认</p></div>
+        <span class="asset-section-count">共 {{ transferTotal }} 笔</span>
+      </div>
+
+      <div v-if="transfers.length" class="transaction-list transfer-list">
+        <article v-for="tx in transfers" :key="tx.id" class="transaction-row">
+          <span class="transaction-icon" :class="{ 'transaction-icon--out': isMe(tx.fromUserId) }">
+            <ArrowDownLeft v-if="!isMe(tx.fromUserId)" :size="17" aria-hidden="true" />
+            <ArrowUpRight v-else :size="17" aria-hidden="true" />
+          </span>
+          <div class="transaction-copy">
+            <strong>{{ isMe(tx.fromUserId) ? '转出' : '转入' }} · {{ counterpart(tx) }}</strong>
+            <span>{{ tx.transferNo }} · {{ new Date(tx.createdAt).toLocaleString('zh-CN') }}</span>
+          </div>
+          <div class="transfer-side">
+            <strong class="transaction-amount" :class="{ 'transaction-amount--positive': !isMe(tx.fromUserId) }">
+              {{ isMe(tx.fromUserId) ? '-' : '+' }}{{ money(tx.amount) }}
+            </strong>
+            <span class="transfer-status" :class="`transfer-status--${tx.status.toLowerCase()}`">
+              {{ TRANSFER_STATUS[tx.status] ?? tx.status }}
+            </span>
+            <button
+              v-if="tx.status === 'PENDING' && !isMe(tx.fromUserId)"
+              type="button"
+              class="transfer-accept"
+              :disabled="accepting === String(tx.id)"
+              @click="acceptTransfer(tx)"
+            >
+              {{ accepting === String(tx.id) ? '确认中…' : '确认接收' }}
+            </button>
+          </div>
+        </article>
+      </div>
+      <EmptyState v-else title="暂无转账记录" description="发起转账或收到他人转账后，记录会显示在这里" />
+
+      <div v-if="transferPages > 1" class="transfer-pager">
+        <button type="button" :disabled="transferPage <= 1" @click="loadTransfers(transferPage - 1)">上一页</button>
+        <span>{{ transferPage }} / {{ transferPages }}</span>
+        <button type="button" :disabled="transferPage >= transferPages" @click="loadTransfers(transferPage + 1)">下一页</button>
+      </div>
+    </template>
+
     <p v-if="tabs.length" class="asset-disclaimer">平台资产仅限系统内按业务规则使用，具体规则以平台公示为准。</p>
 
     <AppModal v-if="store.profile?.transferPasswordSet && (store.has('wallet.transfer') || store.has('equity.transfer'))" v-model="showTransfer" eyebrow="资产操作" :title="`发起${tab === 'wallet' ? '转账' : '转让'}`"
@@ -199,5 +292,16 @@ onMounted(load);
 .transaction-amount--positive { color: var(--green); }
 .asset-note { display: flex; gap: 9px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--muted); font-size: 10.5px; line-height: 1.6; }
 .asset-note svg { flex: 0 0 auto; color: var(--accent); }
+.asset-section-count { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.transfer-side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.transfer-status { padding: 1px 6px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 9px; font-weight: 600; }
+.transfer-status--pending { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
+.transfer-status--completed { background: var(--green-soft); color: var(--green); }
+.transfer-status--rejected, .transfer-status--expired { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger); }
+.transfer-accept { min-height: 24px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--brand); color: #fff; font: inherit; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.transfer-accept:disabled { opacity: .55; cursor: default; }
+.transfer-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 10.5px; }
+.transfer-pager button { min-height: 26px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 10.5px; cursor: pointer; }
+.transfer-pager button:disabled { opacity: .45; cursor: default; }
 .asset-disclaimer { margin: 16px 0 0; color: var(--muted); font-size: 9.5px; line-height: 1.6; text-align: center; }
 </style>

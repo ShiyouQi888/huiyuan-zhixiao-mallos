@@ -46,7 +46,7 @@ export class AuthController {
     await this.prisma.wallet.create({ data: { userId: user.id } });
     await this.prisma.equityAccount.create({ data: { userId: user.id } });
 
-    return this.sign(user.id, user.phone, user.role);
+    return this.sign(user.id, user.phone, user.role, user.authVersion);
   }
 
   @Public()
@@ -58,11 +58,11 @@ export class AuthController {
       throw Err.unauthorized('手机号或密码错误');
     }
     if (user.status !== 0) throw Err.forbidden('账号已被冻结');
-    return this.sign(user.id, user.phone, user.role);
+    return this.sign(user.id, user.phone, user.role, user.authVersion);
   }
 
-  private async sign(id: bigint, phone: string | null, role: string) {
-    const token = this.jwt.sign({ sub: id.toString(), phone, role });
+  private async sign(id: bigint, phone: string | null, role: string, authVersion = 0) {
+    const token = this.jwt.sign({ sub: id.toString(), phone, role, authVersion });
     return { token, tokenType: 'Bearer', user: { id: id.toString(), phone, role } };
   }
 }

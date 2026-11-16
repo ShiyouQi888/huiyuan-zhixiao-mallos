@@ -21,7 +21,7 @@ const routes = [
   { path: '/product/:id', component: () => import('./pages/ProductDetail.vue'), meta: { immersive: true, flag: 'product.mall' } },
   { path: '/orders', component: () => import('./pages/Orders.vue') },
   { path: '/assets', component: () => import('./pages/Assets.vue'), meta: { flagsAny: ['wallet.account', 'equity.account', 'token.view'] } },
-  { path: '/packages', component: () => import('./pages/Packages.vue'), meta: { flag: 'package.purchase' } },
+  { path: '/packages', component: () => import('./pages/Packages.vue'), meta: { flagsAny: ['package.purchase', 'member.upgrade', 'member.repurchase'] } },
   { path: '/addresses', component: () => import('./pages/Addresses.vue'), meta: { flag: 'address.manage' } },
   { path: '/security/transfer-password', component: () => import('./pages/TransferPassword.vue'), meta: { flag: 'transfer.password' } },
 

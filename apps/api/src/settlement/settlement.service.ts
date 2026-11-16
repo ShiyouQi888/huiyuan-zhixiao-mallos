@@ -283,7 +283,7 @@ export class SettlementService {
             rankLevel: true,
             equityStatus: true,
             peerBonusLocked: true,
-            parent: { select: { rankLevel: true, equityStatus: true } },
+            parent: { select: { rankLevel: true, equityStatus: true, status: true } },
           },
         },
       },
@@ -294,6 +294,7 @@ export class SettlementService {
       const x = row.user;
       const p = x.parent;
       if (!p || x.rankLevel <= 0) continue;
+      if (p.status === 2) continue; // 已注销上级不再获得新增平级奖或领导奖
 
       const teamBonus = BigInt(Math.round(Number(row.teamAmount) * (rateMap.get(x.rankLevel) ?? 0)));
       if (teamBonus <= 0n) continue;

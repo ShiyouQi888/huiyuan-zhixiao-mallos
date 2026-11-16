@@ -6,7 +6,18 @@ import { Award, ArrowUpRight, Check, History } from 'lucide-vue-next';
 const rank = ref<any>(null);
 const logs = ref<any[]>([]);
 const loading = ref(true);
+const logPage = ref(1);
+const logTotal = ref(0);
+const logPageSize = 20;
 const isTopRank = computed(() => Boolean(rank.value) && rank.value.nextRank === null);
+const logPages = computed(() => Math.max(1, Math.ceil(logTotal.value / logPageSize)));
+
+async function loadLogs(page = logPage.value) {
+  logPage.value = page;
+  const result = await api<any>(`/me/rank/logs?page=${page}`).catch(() => null);
+  logs.value = result?.list ?? [];
+  logTotal.value = result?.total ?? 0;
+}
 
 onMounted(async () => {
   const [rankResult, logResult] = await Promise.allSettled([
@@ -15,6 +26,7 @@ onMounted(async () => {
   ]);
   rank.value = rankResult.status === 'fulfilled' ? rankResult.value : null;
   logs.value = logResult.status === 'fulfilled' ? logResult.value.list ?? [] : [];
+  logTotal.value = logResult.status === 'fulfilled' ? logResult.value.total ?? 0 : 0;
   loading.value = false;
 });
 
@@ -93,6 +105,12 @@ function formatDate(value: string) {
         </div>
       </div>
       <div v-else class="card rank-history-empty">暂无等级变更记录</div>
+
+      <div v-if="logPages > 1" class="rank-pager">
+        <button type="button" :disabled="logPage <= 1" @click="loadLogs(logPage - 1)">上一页</button>
+        <span>{{ logPage }} / {{ logPages }} · 共 {{ logTotal }} 条</span>
+        <button type="button" :disabled="logPage >= logPages" @click="loadLogs(logPage + 1)">下一页</button>
+      </div>
     </template>
     <div v-else class="card rank-history-empty">等级信息暂时无法加载，请稍后重试。</div>
   </div>
@@ -135,4 +153,7 @@ function formatDate(value: string) {
 .rank-history-meta { margin-top: 4px; font-size: 9px; }
 .rank-history-performance { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
 .rank-history-empty { padding: 24px 16px; color: var(--muted); font-size: 11px; text-align: center; }
+.rank-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 10.5px; }
+.rank-pager button { min-height: 26px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 10.5px; cursor: pointer; }
+.rank-pager button:disabled { opacity: .45; cursor: default; }
 </style>

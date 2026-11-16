@@ -106,6 +106,33 @@ export class BonusService {
     return { total: aggregate._sum.amount ?? 0n, byType, recent };
   }
 
+  /** 今日 / 本月收益汇总（按结算日期归属自然日、自然月） */
+  async periodSummary(userId: bigint, includeDividend = true) {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const base = { userId, ...(includeDividend ? {} : { type: { not: 5 } }) };
+    const [today, month] = await Promise.all([
+      this.prisma.bonusRecord.aggregate({
+        where: { ...base, settleDate: { gte: startOfDay } },
+        _sum: { amount: true, cashAmount: true, tokenAmount: true },
+        _count: true,
+      }),
+      this.prisma.bonusRecord.aggregate({
+        where: { ...base, settleDate: { gte: startOfMonth } },
+        _sum: { amount: true, cashAmount: true, tokenAmount: true },
+        _count: true,
+      }),
+    ]);
+    const pack = (row: { _sum: { amount: bigint | null; cashAmount: bigint | null; tokenAmount: bigint | null }; _count: number }) => ({
+      amount: row._sum.amount ?? 0n,
+      cashAmount: row._sum.cashAmount ?? 0n,
+      tokenAmount: row._sum.tokenAmount ?? 0n,
+      count: row._count,
+    });
+    return { today: pack(today), month: pack(month), date: startOfDay.toISOString().slice(0, 10) };
+  }
+
   async records(userId: bigint, page = 1, pageSize = 20, type?: number, includeDividend = true) {
     if (type !== undefined && (!Number.isInteger(type) || type < 1 || type > 6)) {
       throw Err.param('收益类型不合法');

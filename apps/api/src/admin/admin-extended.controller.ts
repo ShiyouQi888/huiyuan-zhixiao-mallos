@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { BusinessException } from '../common/business.exception';
@@ -208,18 +208,142 @@ export class AdminExtendedController {
     return this.prisma.rank.findMany({ orderBy: { level: 'asc' } });
   }
 
+  @Post('ranks')
+  @Roles('SUPER_ADMIN')
+  async createRank(
+    @Body() body: { name?: string; threshold?: number; teamRate?: number; poolRate?: number },
+    @CurrentUser() operator: CurrentUserPayload,
+  ) {
+    const name = body.name?.trim() ?? '';
+    if (name.length < 2 || name.length > 64) throw new BusinessException(1001, '等级名称需为 2–64 个字符');
+    const threshold = this.rankThreshold(body.threshold);
+    const teamRate = this.rankRate(body.teamRate, '团队奖费率');
+    const poolRate = this.rankRate(body.poolRate, '分红池比例');
+    const highest = await this.prisma.rank.findFirst({ orderBy: { level: 'desc' } });
+    if (highest && threshold <= highest.threshold) throw new BusinessException(1001, '新等级门槛必须高于现有最高等级');
+    const level = (highest?.level ?? -1) + 1;
+
+    return this.prisma.$transaction(async (tx) => {
+      const rank = await tx.rank.create({
+        data: { name, level, threshold, teamRate, poolRate, sort: level, status: 1 },
+      });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId: operator.id, action: 'RANK_CREATED', targetType: 'RANK', targetId: BigInt(rank.id),
+          after: { id: rank.id, level, name, threshold: threshold.toString(), teamRate, poolRate, status: 1 } as never,
+        },
+      });
+      return rank;
+    });
+  }
+
   @Put('ranks/:id')
   @Roles('SUPER_ADMIN')
-  updateRank(@Param('id') id: string, @Body() body: Partial<{ name: string; threshold: number; teamRate: number; poolRate: number }>) {
-    return this.prisma.rank.update({
-      where: { id: Number(id) },
-      data: {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.threshold !== undefined ? { threshold: BigInt(body.threshold) } : {}),
-        ...(body.teamRate !== undefined ? { teamRate: body.teamRate } : {}),
-        ...(body.poolRate !== undefined ? { poolRate: body.poolRate } : {}),
-      },
+  async updateRank(
+    @Param('id') id: string,
+    @Body() body: Partial<{ name: string; threshold: number; teamRate: number; poolRate: number }>,
+    @CurrentUser() operator: CurrentUserPayload,
+  ) {
+    const rankId = this.rankId(id);
+    const before = await this.prisma.rank.findUnique({ where: { id: rankId } });
+    if (!before) throw new BusinessException(4003, '等级不存在');
+    const name = body.name === undefined ? before.name : (body.name ?? '').trim();
+    if (name.length < 2 || name.length > 64) throw new BusinessException(1001, '等级名称需为 2–64 个字符');
+    const threshold = body.threshold === undefined ? before.threshold : this.rankThreshold(body.threshold);
+    const teamRate = body.teamRate === undefined ? Number(before.teamRate) : this.rankRate(body.teamRate, '团队奖费率');
+    const poolRate = body.poolRate === undefined ? Number(before.poolRate) : this.rankRate(body.poolRate, '分红池比例');
+    const [previous, next] = await Promise.all([
+      this.prisma.rank.findFirst({ where: { level: { lt: before.level } }, orderBy: { level: 'desc' } }),
+      this.prisma.rank.findFirst({ where: { level: { gt: before.level } }, orderBy: { level: 'asc' } }),
+    ]);
+    if (previous && threshold <= previous.threshold) throw new BusinessException(1001, '累计业绩门槛必须高于前一等级');
+    if (next && threshold >= next.threshold) throw new BusinessException(1001, '累计业绩门槛必须低于后一等级');
+
+    return this.prisma.$transaction(async (tx) => {
+      const rank = await tx.rank.update({ where: { id: rankId }, data: { name, threshold, teamRate, poolRate } });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId: operator.id, action: 'RANK_UPDATED', targetType: 'RANK', targetId: BigInt(rank.id),
+          before: { name: before.name, threshold: before.threshold.toString(), teamRate: Number(before.teamRate), poolRate: Number(before.poolRate) } as never,
+          after: { name, threshold: threshold.toString(), teamRate, poolRate } as never,
+        },
+      });
+      return rank;
     });
+  }
+
+  @Put('ranks/:id/status')
+  @Roles('SUPER_ADMIN')
+  async updateRankStatus(
+    @Param('id') id: string,
+    @Body() body: { status?: number },
+    @CurrentUser() operator: CurrentUserPayload,
+  ) {
+    const rankId = this.rankId(id);
+    if (body.status !== 0 && body.status !== 1) throw new BusinessException(1001, '等级状态无效');
+    const before = await this.prisma.rank.findUnique({ where: { id: rankId } });
+    if (!before) throw new BusinessException(4003, '等级不存在');
+    if (before.level === 0 && body.status === 0) throw new BusinessException(3002, '普通会员等级是系统基础等级，不能停用');
+    if (before.status === body.status) return before;
+
+    return this.prisma.$transaction(async (tx) => {
+      const rank = await tx.rank.update({ where: { id: rankId }, data: { status: body.status } });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId: operator.id,
+          action: body.status === 1 ? 'RANK_ENABLED' : 'RANK_DISABLED', targetType: 'RANK', targetId: BigInt(rank.id),
+          before: { status: before.status } as never, after: { status: body.status } as never,
+        },
+      });
+      return rank;
+    });
+  }
+
+  @Delete('ranks/:id')
+  @Roles('SUPER_ADMIN')
+  async deleteRank(@Param('id') id: string, @CurrentUser() operator: CurrentUserPayload) {
+    const rankId = this.rankId(id);
+    const rank = await this.prisma.rank.findUnique({ where: { id: rankId } });
+    if (!rank) throw new BusinessException(4003, '等级不存在');
+    if (rank.level === 0) throw new BusinessException(3002, '普通会员等级是系统基础等级，不能删除');
+    const [users, snapshots, dividends, logs] = await Promise.all([
+      this.prisma.user.count({ where: { rankId } }),
+      this.prisma.rankSnapshot.count({ where: { rankId } }),
+      this.prisma.dividend.count({ where: { rankId } }),
+      this.prisma.rankLog.count({ where: { OR: [{ fromLevel: rank.level }, { toLevel: rank.level }] } }),
+    ]);
+    if (users || snapshots || dividends || logs) {
+      throw new BusinessException(3002, '该等级已有会员或历史记录，不能删除；请停用以保留账务与升级历史');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.rank.delete({ where: { id: rankId } });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId: operator.id, action: 'RANK_DELETED', targetType: 'RANK', targetId: BigInt(rank.id),
+          before: { id: rank.id, level: rank.level, name: rank.name, threshold: rank.threshold.toString() } as never,
+        },
+      });
+      return { deleted: true, id: rank.id };
+    });
+  }
+
+  private rankId(value: string): number {
+    const id = Number(value);
+    if (!Number.isSafeInteger(id) || id < 0) throw new BusinessException(1001, '等级编号无效');
+    return id;
+  }
+
+  private rankThreshold(value?: number): bigint {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new BusinessException(1001, '累计业绩门槛必须是非负整数');
+    return BigInt(value!);
+  }
+
+  private rankRate(value: number | undefined, label: string): number {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      throw new BusinessException(1001, `${label}必须在 0 至 1 之间`);
+    }
+    return value;
   }
 
   @Get('ranks/logs')

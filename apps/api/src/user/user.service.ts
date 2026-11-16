@@ -52,7 +52,7 @@ export class UserService {
     });
     if (!user) throw Err.notFound('用户不存在');
     const ranks = await this.prisma.rank.findMany({ orderBy: { level: 'asc' } });
-    const nextRank = ranks.find((r) => r.level === user.rankLevel + 1);
+    const nextRank = ranks.find((r) => r.status === 1 && r.level > user.rankLevel);
     return {
       rankName: user.rank.name,
       rankLevel: user.rankLevel,
@@ -67,6 +67,7 @@ export class UserService {
         threshold: rank.threshold,
         teamRate: Number(rank.teamRate),
         poolRate: Number(rank.poolRate),
+        status: rank.status,
       })),
       nextRank: nextRank
         ? { name: nextRank.name, threshold: nextRank.threshold, gap: nextRank.threshold > user.totalTeamPerformance ? nextRank.threshold - user.totalTeamPerformance : 0n }
@@ -257,10 +258,10 @@ export class UserService {
 
   async adjustRank(userId: bigint, level: number) {
     const rank = await this.prisma.rank.findUnique({ where: { level } });
-    if (!rank) throw Err.param('等级不存在');
+    if (!rank || rank.status !== 1) throw Err.param('等级不存在或已停用');
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUnique({ where: { id: userId } });
-      if (!user) throw Err.notFound('用户不存在');
+      if (!user || user.role !== 'MEMBER' || user.status === 2) throw Err.notFound('会员不存在');
       await tx.user.update({ where: { id: userId }, data: { rankId: rank.id, rankLevel: rank.level, rankAchievedAt: new Date() } });
       await tx.rankLog.create({
         data: { userId, fromLevel: user.rankLevel, toLevel: rank.level, totalPerformance: user.totalTeamPerformance, triggerType: 'MANUAL' },
@@ -269,7 +270,24 @@ export class UserService {
     });
   }
 
-  async freeze(userId: bigint, frozen: boolean) {
-    return this.prisma.user.update({ where: { id: userId }, data: { status: frozen ? 1 : 0 } });
+  async freeze(userId: bigint, frozen: boolean, operatorId: bigint) {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.user.findUnique({ where: { id: userId } });
+      if (!before || before.role !== 'MEMBER') throw Err.notFound('会员不存在');
+      if (before.status === 2) throw Err.conflict('已注销账号不能冻结或解冻');
+      const status = frozen ? 1 : 0;
+      if (before.status === status) return before;
+      const updated = await tx.user.update({ where: { id: userId }, data: { status, authVersion: { increment: 1 } } });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId,
+          action: frozen ? 'MEMBER_FROZEN' : 'MEMBER_UNFROZEN',
+          targetType: 'USER', targetId: userId,
+          before: { status: before.status } as never,
+          after: { status } as never,
+        },
+      });
+      return updated;
+    });
   }
 }

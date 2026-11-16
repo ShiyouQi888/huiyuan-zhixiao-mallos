@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CircleDollarSign, Coins, Plus, Wallet } from 'lucide-react';
 import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
+import { BonusPlans } from './BonusPlans';
 import { BonusSettings } from './BonusSettings';
+import { Dividends } from './Dividends';
 import {
   Badge, Button, Card, Empty, ErrorBlock, Field, Modal, PageHeader, Pagination, StatCard, Tabs, TextInput, Toast,
 } from '../components/ui';
@@ -39,7 +41,7 @@ export function Bonuses() {
   const [saving, setSaving] = useState(false);
   const canAdjust = ['SUPER_ADMIN', 'OPERATOR'].includes(getAdminRole() ?? '');
   const canConfigure = getAdminRole() === 'SUPER_ADMIN';
-  const [section, setSection] = useState<'records' | 'settings'>('records');
+  const [section, setSection] = useState<'records' | 'plans' | 'dividends' | 'settings'>('records');
 
   const loadRecords = useCallback(async () => {
     setError('');
@@ -111,28 +113,36 @@ export function Bonuses() {
   return (
     <>
       <PageHeader
-        title={section === 'settings' ? '奖金设置' : '奖金明细'}
+        title={section === 'settings' ? '奖金设置' : section === 'plans' ? '直推奖计划' : section === 'dividends' ? '分红' : '奖金明细'}
         description={section === 'settings'
           ? '配置五条收益线的比例、拆分比例与直推奖释放期数'
-          : '五条收益线的入账记录与 70/30 拆分结果'}
+          : section === 'plans'
+            ? '按订单生成的直推奖分期释放计划与进度'
+            : section === 'dividends'
+              ? '各等级分红池快照与分红发放明细'
+              : '五条收益线的入账记录与 70/30 拆分结果'}
         action={section === 'records' && canAdjust
           ? <Button variant="primary" onClick={openAdjust}><Plus size={15} />发起奖金调整</Button>
           : undefined}
       />
 
-      {canConfigure && (
-        <Tabs
-          className="mb-4"
-          value={section}
-          onChange={(value) => setSection(value as 'records' | 'settings')}
-          items={[
-            { value: 'records', label: '奖金明细' },
-            { value: 'settings', label: '奖金设置' },
-          ]}
-        />
-      )}
+      <Tabs
+        className="mb-4"
+        value={section}
+        onChange={(value) => setSection(value as typeof section)}
+        items={[
+          { value: 'records', label: '奖金明细' },
+          { value: 'plans', label: '直推奖计划' },
+          { value: 'dividends', label: '分红' },
+          ...(canConfigure ? [{ value: 'settings', label: '奖金设置' }] : []),
+        ]}
+      />
 
-      {section === 'settings' && canConfigure ? (
+      {section === 'plans' ? (
+        <BonusPlans />
+      ) : section === 'dividends' ? (
+        <Dividends />
+      ) : section === 'settings' && canConfigure ? (
         <BonusSettings />
       ) : (
         <>

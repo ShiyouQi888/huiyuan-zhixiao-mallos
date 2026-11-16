@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
-  ChevronRight, CircleDollarSign, GitBranch, RefreshCw, ShieldOff, TrendingUp, UserRound, Wallet,
+  ChevronRight, CircleDollarSign, GitBranch, KeyRound, Pencil, Plus, RefreshCw, ShieldOff, Trash2, TrendingUp, UserRound, Wallet,
 } from 'lucide-react';
-import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
+import { api, fmtDate, fmtMoney, getAdminRole, post, put } from '../api';
 import type { Member } from '../types';
 import {
   Badge, Button, Card, CardHeader, Drawer, Empty, Field, FilterBar, KeyValue, LoadingBlock,
-  Modal, PageHeader, Pagination, SearchField, SelectField, TableSkeleton, TextInput, Toast, useConfirm,
+  Modal, PageHeader, Pagination, SearchField, SelectField, TableSkeleton, Tabs, TextInput, Toast, useConfirm,
 } from '../components/ui';
 
 const RANK_NAMES = ['普通会员', '业务主任', '业务经理', '业务总监', '业务副总', '业务总经理', '业务总裁'];
@@ -39,7 +39,7 @@ function countDescendants(node: MemberTreeNode): number {
   return node.children.reduce((count, child) => count + 1 + countDescendants(child), 0);
 }
 
-function TeamTreeNode({ node, root = false }: { node: MemberTreeNode; root?: boolean }) {
+function TeamTreeNode({ node, root = false, rankLabels = {} }: { node: MemberTreeNode; root?: boolean; rankLabels?: Record<number, string> }) {
   const label = node.nickname || `会员 ${node.id}`;
   const content = (
     <div className={`flex min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 ${root ? 'bg-accent-soft' : 'transition hover:bg-hover'}`}>
@@ -54,7 +54,7 @@ function TeamTreeNode({ node, root = false }: { node: MemberTreeNode; root?: boo
         <div className="mt-0.5 truncate mono text-2xs text-ink-faint">{node.phone ?? '—'}</div>
       </div>
       <span className="shrink-0 rounded-md bg-panel px-2 py-0.5 text-2xs text-ink-muted ring-1 ring-[var(--line)]">
-        {RANK_NAMES[node.rankLevel] ?? `等级 ${node.rankLevel}`}
+        {rankLabels[node.rankLevel] ?? RANK_NAMES[node.rankLevel] ?? `等级 ${node.rankLevel}`}
       </span>
       <span className="shrink-0 text-2xs text-ink-faint">{node.children.length} 位直推</span>
     </div>
@@ -70,7 +70,7 @@ function TeamTreeNode({ node, root = false }: { node: MemberTreeNode; root?: boo
         </div>
       </summary>
       <div className="ml-3 mt-1 space-y-1 border-l border-line pl-3">
-        {node.children.map((child) => <TeamTreeNode key={child.id} node={child} />)}
+        {node.children.map((child) => <TeamTreeNode key={child.id} node={child} rankLabels={rankLabels} />)}
       </div>
     </details>
   );
@@ -78,6 +78,7 @@ function TeamTreeNode({ node, root = false }: { node: MemberTreeNode; root?: boo
 
 export function Members() {
   const [list, setList] = useState<Member[]>([]);
+  const [ranks, setRanks] = useState<Array<{ level: number; name: string; status: number }>>([]);
   const [keyword, setKeyword] = useState('');
   const [rankFilter, setRankFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -99,10 +100,26 @@ export function Members() {
   const [parentSearching, setParentSearching] = useState(false);
   const [rebindReason, setRebindReason] = useState('');
   const [rebindBusy, setRebindBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createForm, setCreateForm] = useState({ nickname: '', phone: '', password: '', referrer: '' });
+  const [managedMember, setManagedMember] = useState<Member | null>(null);
+  const [manageTab, setManageTab] = useState<'profile' | 'security' | 'wallet' | 'danger'>('profile');
+  const [manageBusy, setManageBusy] = useState(false);
+  const [manageForm, setManageForm] = useState({ nickname: '', phone: '', password: '', amount: '', rechargeReason: '', deleteReason: '' });
   const [toast, setToast] = useState('');
   const { confirm, confirmNode } = useConfirm();
   const role = getAdminRole();
   const canManageMembers = role === 'SUPER_ADMIN' || role === 'OPERATOR';
+  const canRecharge = role === 'SUPER_ADMIN' || role === 'FINANCE';
+  const canDeleteMembers = role === 'SUPER_ADMIN';
+  const rankName = (rankLevel: number) => ranks.find((rank) => rank.level === rankLevel)?.name ?? RANK_NAMES[rankLevel] ?? `等级 ${rankLevel}`;
+  const createFormValid = createForm.nickname.trim().length >= 2
+    && /^1[3-9]\d{9}$/.test(createForm.phone)
+    && createForm.password.length >= 8;
+  const manageProfileValid = manageForm.nickname.trim().length >= 2 && /^1[3-9]\d{9}$/.test(manageForm.phone);
+  const rechargeFormValid = Number.isSafeInteger(Number(manageForm.amount)) && Number(manageForm.amount) > 0
+    && manageForm.rechargeReason.trim().length >= 2;
 
   const load = useCallback(() => {
     setLoading(true);
@@ -120,6 +137,12 @@ export function Members() {
     const timer = window.setTimeout(load, 250);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    api<Array<{ level: number; name: string; status: number }>>('/admin/members/options/ranks')
+      .then(setRanks)
+      .catch((e) => setToast(e.message));
+  }, []);
 
   useEffect(() => {
     if (!rebindOpen || parentSearch.trim().length < 2 || selectedParent) {
@@ -146,7 +169,7 @@ export function Members() {
     if (!target) return;
     try {
       const result = await post<{ direct?: boolean }>(`/admin/members/${target.id}/rank`, { level });
-      setToast(result.direct ? `已将 ${target.nickname ?? '会员'} 调整为${RANK_NAMES[level]}` : `${target.nickname ?? '会员'} 的等级调整申请已提交，等待财务复核`);
+      setToast(result.direct ? `已将 ${target.nickname ?? '会员'} 调整为${rankName(level)}` : `${target.nickname ?? '会员'} 的等级调整申请已提交，等待财务复核`);
       setTarget(null);
       load();
     } catch (e) {
@@ -155,6 +178,7 @@ export function Members() {
   };
 
   const toggleFreeze = async (m: Member) => {
+    if (m.status === 2) return;
     const action = m.status === 0 ? '冻结' : '解冻';
     const agreed = await confirm({
       title: `确定${action}该会员账号？`,
@@ -169,6 +193,99 @@ export function Members() {
       load();
     } catch (e) {
       setToast(e instanceof Error ? e.message : '操作失败');
+    }
+  };
+
+  const createMember = async () => {
+    if (createBusy) return;
+    setCreateBusy(true);
+    try {
+      const created = await post<{ nickname: string; phone: string; inviteCode: string }>('/admin/members', createForm);
+      setToast(`会员已创建 · ${created.nickname} · 邀请码 ${created.inviteCode}`);
+      setCreateOpen(false);
+      setCreateForm({ nickname: '', phone: '', password: '', referrer: '' });
+      if (page !== 1) setPage(1);
+      else load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '创建会员失败');
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const openManagement = (member: Member) => {
+    setManagedMember(member);
+    setManageTab(canManageMembers ? 'profile' : 'wallet');
+    setManageForm({ nickname: member.nickname ?? '', phone: member.phone ?? '', password: '', amount: '', rechargeReason: '', deleteReason: '' });
+  };
+
+  const updateMemberProfile = async () => {
+    if (!managedMember || manageBusy) return;
+    setManageBusy(true);
+    try {
+      await put(`/admin/members/${managedMember.id}`, { nickname: manageForm.nickname, phone: manageForm.phone });
+      setToast('会员资料已更新');
+      setManagedMember(null);
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '资料更新失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const resetMemberPassword = async () => {
+    if (!managedMember || manageBusy) return;
+    setManageBusy(true);
+    try {
+      await put(`/admin/members/${managedMember.id}/password`, { password: manageForm.password });
+      setToast('登录密码已重设，该会员的其他登录会话已撤销');
+      setManageForm((form) => ({ ...form, password: '' }));
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '密码重设失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const rechargeMemberWallet = async () => {
+    if (!managedMember || manageBusy) return;
+    setManageBusy(true);
+    try {
+      await post(`/admin/members/${managedMember.id}/wallet/recharge`, { amount: Number(manageForm.amount), reason: manageForm.rechargeReason });
+      setToast(`已为 ${managedMember.nickname ?? '会员'} 钱包充值 ¥${Number(manageForm.amount).toLocaleString('zh-CN')}`);
+      setManageForm((form) => ({ ...form, amount: '', rechargeReason: '' }));
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '钱包充值失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const deleteMember = async () => {
+    if (!managedMember || manageBusy) return;
+    if (manageForm.deleteReason.trim().length < 2) {
+      setToast('请填写注销原因（至少 2 个字符）');
+      return;
+    }
+    const agreed = await confirm({
+      title: '注销该会员账号？',
+      description: `将停用 ${managedMember.nickname ?? '该会员'}（${managedMember.phone ?? managedMember.inviteCode}）并撤销所有登录会话。订单、团队关系、钱包与权益流水都会保留用于审计。`,
+      confirmText: '确认注销账号',
+      tone: 'danger',
+    });
+    if (!agreed) return;
+    setManageBusy(true);
+    try {
+      await post(`/admin/members/${managedMember.id}/delete`, { reason: manageForm.deleteReason });
+      setToast('会员账号已注销，业务历史已保留');
+      setManagedMember(null);
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '账号注销失败');
+    } finally {
+      setManageBusy(false);
     }
   };
 
@@ -231,11 +348,14 @@ export function Members() {
     <>
       <PageHeader
         title="会员管理"
-        description="查看会员资产、团队业绩与职级，支持筛选、等级调整与账号冻结"
+        description="管理会员资料、等级、账号状态与钱包；敏感操作全程留痕并撤销相关会话"
         action={(
-          <Button variant="secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
-          </Button>
+          <>
+            {canManageMembers && <Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={15} />新增会员</Button>}
+            <Button variant="secondary" onClick={load} disabled={loading}>
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
+            </Button>
+          </>
         )}
       />
 
@@ -254,7 +374,7 @@ export function Members() {
             onChange={(event) => { setPage(1); setRankFilter(event.target.value); }}
             options={[
               { value: 'all', label: '全部等级' },
-              ...RANK_NAMES.map((name, index) => ({ value: String(index), label: name })),
+              ...ranks.map((rank) => ({ value: String(rank.level), label: `${rank.name}${rank.status === 1 ? '' : '（已停用）'}` })),
             ]}
           />
           <SelectField
@@ -333,7 +453,7 @@ export function Members() {
                         : <span className="text-ink-faint">普通用户</span>}
                     </td>
                     <td className="td">
-                      <Badge tone={m.rankLevel > 0 ? 'brand' : 'neutral'}>{RANK_NAMES[m.rankLevel] ?? '—'}</Badge>
+                      <Badge tone={m.rankLevel > 0 ? 'brand' : 'neutral'}>{rankName(m.rankLevel)}</Badge>
                     </td>
                     <td className="td num text-right font-medium text-ink">{fmtMoney(m.totalTeamPerformance)}</td>
                     <td className="td">
@@ -355,18 +475,23 @@ export function Members() {
                         </Button>
                         {canManageMembers && (
                           <>
-                            <Button size="xs" variant="ghost" onClick={() => { setTarget(m); setLevel(m.rankLevel); }}>
+                            {m.status !== 2 && <Button size="xs" variant="ghost" onClick={() => { setTarget(m); setLevel(m.rankLevel); }}>
                               <TrendingUp size={13} />调级
-                            </Button>
-                            <Button
+                            </Button>}
+                            {m.status !== 2 && <Button
                               size="xs"
                               variant="ghost"
                               className="hover:text-danger"
                               onClick={() => void toggleFreeze(m)}
                             >
                               <ShieldOff size={13} />{m.status === 0 ? '冻结' : '解冻'}
-                            </Button>
+                            </Button>}
                           </>
+                        )}
+                        {(canManageMembers || canRecharge || canDeleteMembers) && (
+                          <Button size="xs" variant="ghost" onClick={() => openManagement(m)}>
+                            <Pencil size={13} />管理
+                          </Button>
                         )}
                       </div>
                     </td>
@@ -387,6 +512,107 @@ export function Members() {
       </Card>
 
       <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="新增会员账号"
+        description="创建后将自动生成邀请码，并按系统关系规则初始化钱包与权益账户。"
+        footer={(
+          <>
+            <Button onClick={() => setCreateOpen(false)}>取消</Button>
+            <Button variant="primary" disabled={createBusy || !createFormValid} onClick={() => void createMember()}>
+              <Plus size={14} />{createBusy ? '创建中…' : '创建会员'}
+            </Button>
+          </>
+        )}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="会员昵称" required>
+            <TextInput className="input" value={createForm.nickname} onChange={(event) => setCreateForm({ ...createForm, nickname: event.target.value })} placeholder="请输入 2–64 个字符" />
+          </Field>
+          <Field label="手机号" required hint="仅支持 11 位大陆手机号">
+            <TextInput className="input" type="tel" value={createForm.phone} onChange={(event) => setCreateForm({ ...createForm, phone: event.target.value.replace(/\D/g, '').slice(0, 11) })} placeholder="请输入手机号" />
+          </Field>
+          <Field label="初始登录密码" required hint="8–64 位；创建后可在账号管理中重设">
+            <TextInput className="input" type="password" autoComplete="new-password" value={createForm.password} onChange={(event) => setCreateForm({ ...createForm, password: event.target.value })} placeholder="设置初始密码" />
+          </Field>
+          <Field label="推荐人手机号 / 邀请码" hint="选填；留空则创建为独立根会员">
+            <TextInput className="input" value={createForm.referrer} onChange={(event) => setCreateForm({ ...createForm, referrer: event.target.value })} placeholder="手机号或邀请码" />
+          </Field>
+        </div>
+        <div className="notice notice-info mt-4">
+          <UserRound size={14} />账号按普通会员等级初始化；首次开通礼包、升级与复消由会员端完成。
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!managedMember}
+        onClose={() => setManagedMember(null)}
+        title={`账号管理 · ${managedMember?.nickname ?? '会员'}`}
+        description={`${managedMember?.phone ?? '—'} · 邀请码 ${managedMember?.inviteCode ?? '—'}`}
+        size="lg"
+      >
+        {managedMember?.status === 2 ? (
+          <div className="notice notice-warning"><ShieldOff size={14} />该会员账号已注销，账号资料与资金流水仅供审计查阅。</div>
+        ) : (
+          <>
+            <Tabs
+              className="mb-4"
+              value={manageTab}
+              onChange={(value) => setManageTab(value as typeof manageTab)}
+              items={[
+                ...(canManageMembers ? [{ value: 'profile', label: '基本资料' }, { value: 'security', label: '密码安全' }] : []),
+                ...(canRecharge ? [{ value: 'wallet', label: '钱包充值' }] : []),
+                ...(canDeleteMembers ? [{ value: 'danger', label: '注销账号' }] : []),
+              ]}
+            />
+            {manageTab === 'profile' && canManageMembers && (
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="会员昵称" required><TextInput className="input" value={manageForm.nickname} onChange={(event) => setManageForm({ ...manageForm, nickname: event.target.value })} /></Field>
+                  <Field label="手机号" required hint="变更手机号后，原登录会话将立即失效"><TextInput className="input" type="tel" value={manageForm.phone} onChange={(event) => setManageForm({ ...manageForm, phone: event.target.value.replace(/\D/g, '').slice(0, 11) })} /></Field>
+                </div>
+                <div className="flex justify-end"><Button variant="primary" disabled={manageBusy || !manageProfileValid} onClick={() => void updateMemberProfile()}><Pencil size={14} />保存资料</Button></div>
+              </div>
+            )}
+            {manageTab === 'security' && canManageMembers && (
+              <div className="space-y-4">
+                <Field label="新登录密码" required hint="至少 8 位。保存后将撤销该会员所有已登录设备的会话。">
+                  <TextInput className="input" type="password" autoComplete="new-password" value={manageForm.password} onChange={(event) => setManageForm({ ...manageForm, password: event.target.value })} placeholder="输入新的登录密码" />
+                </Field>
+                <div className="flex justify-end"><Button variant="primary" disabled={manageBusy || manageForm.password.length < 8} onClick={() => void resetMemberPassword()}><KeyRound size={14} />重设登录密码</Button></div>
+              </div>
+            )}
+            {manageTab === 'wallet' && canRecharge && (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ProfileMetric label="当前钱包余额" value={fmtMoney(managedMember?.wallet?.balance)} icon={<Wallet size={15} />} />
+                  <ProfileMetric label="当前权益值余额" value={fmtMoney(managedMember?.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="充值金额（元）" required hint="仅允许正整数，写入钱包流水">
+                    <TextInput className="input" type="text" value={manageForm.amount} onChange={(event) => setManageForm({ ...manageForm, amount: event.target.value.replace(/\D/g, '') })} placeholder="请输入充值金额" />
+                  </Field>
+                  <Field label="充值原因" required hint="2–256 个字符，将写入财务审计">
+                    <TextInput className="input" value={manageForm.rechargeReason} onChange={(event) => setManageForm({ ...manageForm, rechargeReason: event.target.value })} placeholder="例如：线下活动补偿" />
+                  </Field>
+                </div>
+                <div className="flex justify-end"><Button variant="primary" disabled={manageBusy || !rechargeFormValid} onClick={() => void rechargeMemberWallet()}><Wallet size={14} />确认充值</Button></div>
+              </div>
+            )}
+            {manageTab === 'danger' && canDeleteMembers && (
+              <div className="space-y-4">
+                <div className="notice notice-danger"><ShieldOff size={14} />注销后账号不能登录、下单或参与计酬。为保留财务与团队审计，系统会执行逻辑删除，不会物理删除资金和关系历史。</div>
+                <Field label="注销原因" required hint="2–256 个字符，作为操作审计记录">
+                  <TextInput className="input" value={manageForm.deleteReason} onChange={(event) => setManageForm({ ...manageForm, deleteReason: event.target.value })} placeholder="填写账号注销原因" />
+                </Field>
+                <div className="flex justify-end"><Button variant="danger" disabled={manageBusy || manageForm.deleteReason.trim().length < 2} onClick={() => void deleteMember()}><Trash2 size={14} />注销会员账号</Button></div>
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
+
+      <Modal
         open={!!target}
         onClose={() => setTarget(null)}
         title="调整会员等级"
@@ -401,7 +627,7 @@ export function Members() {
         )}
       >
         <div className="grid grid-cols-2 gap-2">
-          {RANK_NAMES.map((name, lv) => (
+          {ranks.filter((rank) => rank.status === 1).map(({ level: lv, name }) => (
             <button
               key={lv}
               type="button"
@@ -470,7 +696,7 @@ export function Members() {
               />
               <div className="grid gap-x-6 gap-y-4 p-4 sm:grid-cols-2">
                 <KeyValue label="邀请码" value={profile.inviteCode} mono />
-                <KeyValue label="会员等级" value={profile.rank?.name ?? RANK_NAMES[profile.rankLevel] ?? '—'} />
+                <KeyValue label="会员等级" value={profile.rank?.name ?? rankName(profile.rankLevel)} />
                 <KeyValue label="当前档位" value={profile.package?.name ?? '普通用户'} />
                 <KeyValue label="档位到期时间" value={profile.packageExpireAt ? fmtDate(profile.packageExpireAt) : '—'} />
                 <KeyValue label="直接推荐人" value={profile.parent?.nickname ?? '无'} />
@@ -493,7 +719,7 @@ export function Members() {
                 )}
               />
               {teamTree
-                ? <div className="space-y-1 p-4"><TeamTreeNode node={teamTree} root /></div>
+                ? <div className="space-y-1 p-4"><TeamTreeNode node={teamTree} root rankLabels={Object.fromEntries(ranks.map((rank) => [rank.level, rank.name]))} /></div>
                 : <Empty text="暂无团队关系数据" />}
             </Card>
           </div>

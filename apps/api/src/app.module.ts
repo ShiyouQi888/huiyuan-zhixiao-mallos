@@ -3,6 +3,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AdminController } from './admin/admin.controller';
 import { AdminExtendedController } from './admin/admin-extended.controller';
+import { AdminMemberController } from './admin/admin-member.controller';
 import { AdminModule } from './admin/admin.module';
 import { OperatorAccountsController } from './admin/operator-accounts.controller';
 import { AccessModule } from './access/access.module';
@@ -51,7 +52,7 @@ import { WalletModule } from './wallet/wallet.module';
     TransferModule,
     AdminModule,
   ],
-  controllers: [AuthController, MemberController, OrderController, AdminController, AdminExtendedController, OperatorAccountsController],
+  controllers: [AuthController, MemberController, OrderController, AdminController, AdminExtendedController, AdminMemberController, OperatorAccountsController],
   providers: [
     SettlementService,
     TasksService,

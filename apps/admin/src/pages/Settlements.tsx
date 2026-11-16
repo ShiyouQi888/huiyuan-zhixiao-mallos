@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Play, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { api, fmtDate, getAdminRole, post } from '../api';
 import type { SettleBatch } from '../types';
 import {
-  Badge, Button, Card, CardHeader, Empty, Field, Meter, PageHeader, TableSkeleton, Toast, useConfirm,
+  Badge, Button, Card, CardHeader, Empty, Field, Meter, PageHeader, Pagination, TableSkeleton, Toast, useConfirm,
 } from '../components/ui';
+
+const PAGE_SIZE = 20;
 
 const STATUS_LABELS: Record<string, string> = { DONE: '已完成', FAILED: '失败', RUNNING: '运行中' };
 const STATUS_TONES: Record<string, 'success' | 'danger' | 'warning'> = {
@@ -16,6 +18,7 @@ export function Settlements() {
   const canRunSettlement = role === 'SUPER_ADMIN' || role === 'OPERATOR';
   const canReconcile = role === 'SUPER_ADMIN' || role === 'FINANCE';
   const [batches, setBatches] = useState<SettleBatch[]>([]);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState(() => {
     const d = new Date();
@@ -34,14 +37,14 @@ export function Settlements() {
     setTone(nextTone);
   };
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
-    api<{ list: SettleBatch[] }>('/admin/settlements/daily')
-      .then((r) => setBatches(r.list ?? []))
+    api<SettleBatch[] | { list: SettleBatch[] }>(`/admin/settlements/daily?page=${page}`)
+      .then((r) => setBatches(Array.isArray(r) ? r : (r.list ?? [])))
       .catch((e) => notify(e.message, 'error'))
       .finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+  }, [page]);
+  useEffect(load, [load]);
 
   const run = async () => {
     const agreed = await confirm({
@@ -191,6 +194,7 @@ export function Settlements() {
               </table>
             </div>
           )}
+          <Pagination page={page} pageSize={PAGE_SIZE} hasNext={batches.length >= PAGE_SIZE} onChange={setPage} />
         </Card>
       </div>
 

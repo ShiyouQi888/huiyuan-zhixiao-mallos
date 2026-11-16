@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FileClock, ShieldCheck } from 'lucide-react';
 import { api, fmtDate } from '../api';
 import {
-  Badge, Button, Card, CardHeader, Drawer, Empty, KeyValue, PageHeader, Segmented, TableSkeleton,
+  Badge, Button, Card, CardHeader, Drawer, Empty, ErrorBlock, KeyValue, PageHeader, Pagination,
+  Segmented, TableSkeleton,
 } from '../components/ui';
+
+const PAGE_SIZE = 20;
 
 const ACTION_NAMES: Record<string, string> = {
   WALLET_ADJUST: '钱包调整', EQUITY_ADJUST: '权益值调整', BONUS_ADJUST: '奖金调整',
@@ -14,16 +17,23 @@ const ACTION_NAMES: Record<string, string> = {
 export function Audit() {
   const [logs, setLogs] = useState<any[]>([]);
   const [action, setAction] = useState('');
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [detail, setDetail] = useState<any>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
-    api<any>(`/admin/audit-logs${action ? `?action=${action}` : ''}`)
-      .then((r) => setLogs(r.list ?? r as any))
-      .catch(() => setLogs([]))
+    setError('');
+    const query = new URLSearchParams({ page: String(page) });
+    if (action) query.set('action', action);
+    api<any[] | { list: any[] }>(`/admin/audit-logs?${query.toString()}`)
+      .then((r) => setLogs(Array.isArray(r) ? r : (r.list ?? [])))
+      .catch((e) => setError(e instanceof Error ? e.message : '审计日志加载失败'))
       .finally(() => setLoading(false));
-  }, [action]);
+  }, [action, page]);
+
+  useEffect(() => { void load(); }, [load]);
 
   return (
     <>
@@ -41,6 +51,10 @@ export function Audit() {
             { value: 'ADJUST', label: '调整类' },
             { value: 'PEER_LOCK', label: '平级锁定' },
             { value: 'REBIND', label: '关系换绑' },
+            { value: 'RANK_MANUAL', label: '手工调级' },
+            { value: 'ORDER_DELIVER', label: '订单交付' },
+            { value: 'TRANSFER_REVIEW', label: '转账审核' },
+            { value: 'CONFIG_UPDATE', label: '配置修改' },
           ]}
         />
         <span className="ml-auto text-xs text-ink-faint">
@@ -50,7 +64,9 @@ export function Audit() {
 
       <Card className="overflow-hidden">
         <CardHeader title="操作留痕" description="点击「详情」查看完整变更内容" icon={<ShieldCheck size={15} />} />
-        {loading ? <TableSkeleton rows={8} cols={6} /> : logs.length === 0 ? (
+        {loading ? <TableSkeleton rows={8} cols={6} /> : error ? (
+          <ErrorBlock text={`加载失败：${error}`} action={<Button size="sm" onClick={() => void load()}>重试</Button>} />
+        ) : logs.length === 0 ? (
           <Empty text="暂无审计记录" description="调整资金、换绑关系等敏感操作会在此留痕。" icon={<FileClock size={18} />} />
         ) : (
           <div className="table-wrap">
@@ -93,6 +109,7 @@ export function Audit() {
             </table>
           </div>
         )}
+        {!error && <Pagination page={page} pageSize={PAGE_SIZE} hasNext={logs.length >= PAGE_SIZE} onChange={setPage} />}
       </Card>
 
       {detail && (

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Layers, Save, TrendingUp, Users } from 'lucide-react';
-import { api, fmtDate, fmtMoney, put } from '../api';
+import { ArrowUpRight, Layers, Plus, Power, Save, Trash2, TrendingUp, Users } from 'lucide-react';
+import { api, del, fmtDate, fmtMoney, getAdminRole, post, put } from '../api';
 import {
   Badge, Button, Card, CardHeader, Empty, Field, Modal, PageHeader, StatCard, Tabs, TableSkeleton,
-  TextInput, Toast, cx,
+  TextInput, Toast, cx, useConfirm,
 } from '../components/ui';
 
 const percent = (value: unknown) => `${(Number(value) * 100).toFixed(1)}%`;
@@ -17,6 +17,10 @@ export function Ranks() {
   const [toast, setToast] = useState('');
   const [tone, setTone] = useState<'success' | 'error' | 'info'>('info');
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const role = getAdminRole();
+  const canManage = role === 'SUPER_ADMIN';
+  const { confirm, confirmNode } = useConfirm();
 
   const notify = (message: string, nextTone: 'success' | 'error' | 'info' = 'info') => {
     setToast(message);
@@ -35,19 +39,65 @@ export function Ranks() {
   const save = async () => {
     setSaving(true);
     try {
-      await put(`/admin/ranks/${editing.id}`, {
+      const payload = {
         name: editing.name,
         threshold: Number(editing.threshold),
         teamRate: Number(editing.teamRate),
         poolRate: Number(editing.poolRate),
-      });
-      notify('等级配置已保存，下次日结生效', 'success');
+      };
+      if (creating) await post('/admin/ranks', payload);
+      else await put(`/admin/ranks/${editing.id}`, payload);
+      notify(creating ? '新等级已创建' : '等级配置已保存，下次日结生效', 'success');
       setEditing(null);
+      setCreating(false);
       load();
     } catch (e: any) {
       notify(e.message, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openCreate = () => {
+    const nextThreshold = Math.max(0, ...ranks.map((rank) => Number(rank.threshold) || 0)) + 1;
+    setCreating(true);
+    setEditing({ name: '', threshold: String(nextThreshold), teamRate: '0', poolRate: '0' });
+  };
+
+  const toggleStatus = async (rank: any) => {
+    const enable = rank.status !== 1;
+    const agreed = await confirm({
+      title: `${enable ? '启用' : '停用'} ${rank.name}？`,
+      description: enable
+        ? '启用后该等级可用于新的自动晋级与会员调级。'
+        : '停用后不再自动晋级到该等级，现有会员保留该等级与历史分配规则。',
+      confirmText: enable ? '确认启用' : '确认停用',
+      tone: enable ? 'primary' : 'danger',
+    });
+    if (!agreed) return;
+    try {
+      await put(`/admin/ranks/${rank.id}/status`, { status: enable ? 1 : 0 });
+      notify(`${rank.name}已${enable ? '启用' : '停用'}`, 'success');
+      load();
+    } catch (e: any) {
+      notify(e.message, 'error');
+    }
+  };
+
+  const removeRank = async (rank: any) => {
+    const agreed = await confirm({
+      title: `删除 ${rank.name}？`,
+      description: '仅无会员、分红快照与升级记录引用的等级可以删除。已有历史数据的等级请停用。',
+      confirmText: '删除等级',
+      tone: 'danger',
+    });
+    if (!agreed) return;
+    try {
+      await del(`/admin/ranks/${rank.id}`);
+      notify('等级已删除', 'success');
+      load();
+    } catch (e: any) {
+      notify(e.message, 'error');
     }
   };
 
@@ -58,10 +108,11 @@ export function Ranks() {
       <PageHeader
         title="等级管理"
         description="职级门槛与费率配置（修改后下次日结生效）、历史升级记录"
+        action={canManage ? <Button variant="primary" onClick={openCreate}><Plus size={15} />新增等级</Button> : undefined}
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="等级层级" value={String(ranks.length)} icon={<Layers size={17} />} accent="brand" trend="Lv.0 起共 7 级职级体系" />
+        <StatCard label="等级层级" value={String(ranks.length)} icon={<Layers size={17} />} accent="brand" trend={`启用 ${ranks.filter((rank) => rank.status === 1).length} 个等级`} />
         <StatCard
           label="最高业绩门槛"
           value={fmtMoney(Math.max(0, ...ranks.map((r) => Number(r.threshold) || 0)))}
@@ -101,6 +152,7 @@ export function Ranks() {
                     <th className="th text-right">累计业绩门槛</th>
                     <th className="th text-right">团队奖费率</th>
                     <th className="th text-right">分红池比例</th>
+                    <th className="th">状态</th>
                     <th className="th text-right">操作</th>
                   </tr>
                 </thead>
@@ -112,8 +164,14 @@ export function Ranks() {
                       <td className="td num text-right">{fmtMoney(r.threshold)}</td>
                       <td className="td num text-right text-accent-ink">{percent(r.teamRate)}</td>
                       <td className="td num text-right text-success">{percent(r.poolRate)}</td>
+                      <td className="td"><Badge tone={r.status === 1 ? 'success' : 'neutral'} dot>{r.status === 1 ? '已启用' : '已停用'}</Badge></td>
                       <td className="td text-right">
-                        <Button size="xs" variant="ghost" onClick={() => setEditing({ ...r })}>编辑</Button>
+                        <div className="flex justify-end gap-1">
+                          {canManage && <Button size="xs" variant="ghost" onClick={() => { setCreating(false); setEditing({ ...r }); }}>编辑</Button>}
+                          {canManage && <Button size="xs" variant="ghost" disabled={r.level === 0} onClick={() => void toggleStatus(r)}><Power size={13} />{r.status === 1 ? '停用' : '启用'}</Button>}
+                          {canManage && <Button size="xs" variant="ghost" className="hover:text-danger" disabled={r.level === 0} onClick={() => void removeRank(r)}><Trash2 size={13} />删除</Button>}
+                          {!canManage && <span className="text-xs text-ink-faint">只读</span>}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -169,13 +227,13 @@ export function Ranks() {
       {editing && (
         <Modal
           onClose={() => setEditing(null)}
-          title={`编辑等级 · ${editing.name}`}
-          description="保存后将在下次日结任务生效，不会追溯历史数据"
+          title={creating ? '新增会员等级' : `编辑等级 · ${editing.name}`}
+          description={creating ? '新等级将追加到当前最高层级，等级编号自动生成。' : '保存后将在下次日结任务生效，不会追溯历史数据'}
           footer={(
             <>
-              <Button onClick={() => setEditing(null)}>取消</Button>
-              <Button variant="primary" disabled={saving} onClick={save}>
-                <Save size={14} /> {saving ? '保存中…' : '保存'}
+              <Button onClick={() => { setEditing(null); setCreating(false); }}>取消</Button>
+              <Button variant="primary" disabled={saving || !editing.name.trim()} onClick={save}>
+                <Save size={14} /> {saving ? '保存中…' : creating ? '创建等级' : '保存'}
               </Button>
             </>
           )}
@@ -220,6 +278,7 @@ export function Ranks() {
       )}
 
       {toast && <Toast message={toast} tone={tone} onClose={() => setToast('')} />}
+      {confirmNode}
     </>
   );
 }

@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { BarChart3, Coins, Layers, TrendingUp, Wallet } from 'lucide-react';
 import { api, fmtMoney, getAdminRole } from '../api';
 import {
-  Badge, Card, CardHeader, Empty, ErrorBlock, PageHeader, StatCard, TableSkeleton,
+  Badge, Button, Card, CardHeader, Empty, ErrorBlock, PageHeader, StatCard, TableSkeleton,
 } from '../components/ui';
 
 const BONUS_NAMES: Record<number, string> = { 1: '直推', 2: '团队', 3: '平级', 4: '领导', 5: '分红', 6: '调整' };
@@ -33,22 +33,28 @@ export function Reports() {
   const [hierarchy, setHierarchy] = useState<any[]>([]);
   const [performance, setPerformance] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(0);
+  const [reload, setReload] = useState(0);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setFailed(0);
     const tasks: Promise<unknown>[] = [
       api<any>('/admin/reports/performance?days=14')
         .then((r) => setPerformance((r as any).list ?? r ?? []))
-        .catch(() => {}),
+        .catch(() => setFailed((n) => n + 1)),
     ];
     if (!supportView) {
       tasks.push(
-        api<any>('/admin/reports/issuance').then(setIssuance).catch(() => {}),
-        api<any[]>('/admin/reports/bonus').then(setBonus).catch(() => {}),
-        api<any[]>('/admin/reports/hierarchy').then(setHierarchy).catch(() => {}),
+        api<any>('/admin/reports/issuance').then(setIssuance).catch(() => setFailed((n) => n + 1)),
+        api<any[]>('/admin/reports/bonus').then(setBonus).catch(() => setFailed((n) => n + 1)),
+        api<any[]>('/admin/reports/hierarchy').then(setHierarchy).catch(() => setFailed((n) => n + 1)),
       );
     }
     Promise.all(tasks).finally(() => setLoading(false));
   }, [supportView]);
+
+  useEffect(() => { void load(); }, [load, reload]);
 
   const bonusData = bonus.map((b) => ({ name: BONUS_NAMES[b.type] ?? `类型${b.type}`, amount: Number(b.amount) }));
   const perfData = (() => {
@@ -80,6 +86,13 @@ export function Reports() {
 
       {loading ? (
         <Card><TableSkeleton rows={5} cols={4} /></Card>
+      ) : failed > 0 ? (
+        <Card>
+          <ErrorBlock
+            text={`有 ${failed} 个报表加载失败，请检查网络或后端服务后重试。`}
+            action={<Button size="sm" onClick={() => setReload((n) => n + 1)}>重新加载</Button>}
+          />
+        </Card>
       ) : (
         <>
           {!supportView && (
