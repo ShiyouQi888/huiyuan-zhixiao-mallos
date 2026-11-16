@@ -17,9 +17,14 @@ const inviteCode = computed(() => info.value?.inviteCode ?? store.profile?.invit
 
 onMounted(async () => {
   await store.loadProfile().catch(() => {});
-  info.value = await api<any>('/referral/qrcode').catch(() => null);
-  invites.value = await api<any[]>('/me/team').catch(() => []);
-  stats.value = await api<any>('/me/bonus').catch(() => null);
+  const [referral, team, bonus] = await Promise.all([
+    store.has('referral.center') ? api<any>('/referral/qrcode').catch(() => null) : Promise.resolve(null),
+    store.has('team.view') ? api<any[]>('/me/team').catch(() => []) : Promise.resolve([]),
+    store.has('bonus.detail') ? api<any>('/me/bonus').catch(() => null) : Promise.resolve(null),
+  ]);
+  info.value = referral;
+  invites.value = team;
+  stats.value = bonus;
 });
 
 async function copyLink() {

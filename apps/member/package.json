@@ -2,12 +2,13 @@
   "name": "@solar/member",
   "version": "1.0.0",
   "private": true,
-  "description": "太阳线会员系统 · 会员端（uni-app 风格 H5）",
+  "description": "太阳线会员系统 · H5 会员端（APP 规划中）",
   "scripts": {
     "dev:h5": "vite --host 0.0.0.0",
     "build:h5": "vite build"
   },
   "dependencies": {
+    "@province-city-china/level": "9.0.0",
     "@solar/shared": "workspace:*",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^2.3.0",

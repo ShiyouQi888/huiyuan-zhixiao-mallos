@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
+import { Err } from '../common/business.exception';
 import { FeaturesService } from '../features/features.service';
 import { OrderService } from './order.service';
 
@@ -15,6 +16,7 @@ export class OrderController {
     type: number;
     packageId?: number;
     productId?: number;
+    addressId?: string;
     quantity?: number;
     useEquity?: boolean;
     useBalance?: boolean;
@@ -27,7 +29,13 @@ export class OrderController {
       : 'package.purchase';
     await this.features.assertEnabled(flag, 'h5', current.rankLevel);
 
-    const params = { ...body, userId: current.id, productId: body.productId ? BigInt(body.productId) : undefined };
+    if (body.addressId !== undefined && !/^\d+$/.test(body.addressId)) throw Err.param('收货地址编号格式不正确');
+    const params = {
+      ...body,
+      userId: current.id,
+      productId: body.productId ? BigInt(body.productId) : undefined,
+      addressId: body.addressId ? BigInt(body.addressId) : undefined,
+    };
     return this.orders.create(params);
   }
 
@@ -42,8 +50,8 @@ export class OrderController {
   }
 
   @Get(':no')
-  detail(@Param('no') no: string) {
-    return this.orders.detail(no);
+  detail(@Param('no') no: string, @CurrentUser() current: CurrentUserPayload) {
+    return this.orders.detail(no, current.role === 'MEMBER' ? current.id : undefined);
   }
 
   @Post(':no/confirm')

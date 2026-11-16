@@ -147,6 +147,16 @@
   --td-brand-color-disabled: rgba(255, 122, 69, 0.4);
   --td-brand-color-light: rgba(255, 122, 69, 0.16);
   --td-brand-color-focus: rgba(255, 122, 69, 0.24);
+  --td-bg-color-container: var(--surface);
+  --td-popup-bg-color: var(--surface);
+  --td-text-color-primary: var(--text);
+  --td-text-color-secondary: var(--text-2);
+  --td-text-color-placeholder: var(--muted);
+  --td-component-stroke: var(--line);
+  --td-gray-color-3: var(--line-strong);
+  --td-cascader-bg-color: var(--surface);
+  --td-cascader-title-color: var(--text);
+  --td-cascader-options-title-color: var(--muted);
 }
 
 * {

@@ -56,10 +56,13 @@ const FEATURE_FLAGS = [
   ['wallet.account', '钱包余额', 'wallet'],
   ['wallet.transfer', '余额转账', 'wallet'],
   ['token.view', '数权查看', 'token'],
+  ['rank.view', '等级信息', 'rank'],
   ['rank.dividend', '分红池明细', 'rank'],
   ['notify.subscribe', '消息订阅', 'notify'],
   ['realname', '实名认证', 'user'],
   ['customer.service', '客服入口', 'user'],
+  ['address.manage', '收货地址管理', 'user'],
+  ['transfer.password', '转账支付密码', 'wallet'],
 ] as const;
 
 async function main() {
@@ -95,7 +98,7 @@ async function main() {
   }
   console.log(`  configs: ${CONFIGS.length}`);
 
-  // 功能开关（16）
+  // 功能开关（19）
   for (const [code, name, module] of FEATURE_FLAGS) {
     await prisma.featureFlag.upsert({
       where: { code },

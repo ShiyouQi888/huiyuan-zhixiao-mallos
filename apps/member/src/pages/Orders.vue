@@ -4,7 +4,7 @@ import { api, money, post } from '../api';
 import { Toast } from './_toast';
 import PageHeading from '../components/PageHeading.vue';
 import EmptyState from '../components/EmptyState.vue';
-import { BadgeCheck, ClipboardList, Clock3, Package, RefreshCw, Truck } from 'lucide-vue-next';
+import { BadgeCheck, ClipboardList, Clock3, MapPin, Package, RefreshCw, Truck } from 'lucide-vue-next';
 
 type OrderFilter = 'all' | 'pending' | 'shipping' | 'completed';
 const orders = ref<any[]>([]);
@@ -95,10 +95,10 @@ onMounted(load);
   <main class="page">
     <PageHeading back eyebrow="订单中心" title="我的订单" subtitle="查看订单进度、支付构成与商品信息" />
 
-    <div class="order-filter-list" role="tablist" aria-label="订单状态筛选">
-      <button v-for="item in filters" :key="item.key" type="button" role="tab"
-        class="filter-chip order-filter" :class="{ active: filter === item.key }"
-        :aria-selected="filter === item.key" @click="filter = item.key">
+    <div class="order-filter-list" role="group" aria-label="订单状态筛选">
+      <button v-for="item in filters" :key="item.key" type="button"
+        class="order-filter" :class="{ active: filter === item.key }"
+        :aria-pressed="filter === item.key" @click="filter = item.key">
         {{ item.label }}
       </button>
     </div>
@@ -139,6 +139,10 @@ onMounted(load);
           <span>余额抵扣 <strong>¥{{ money(order.balanceDeduct) }}</strong></span>
           <span>现金支付 <strong>¥{{ money(order.cashPay) }}</strong></span>
         </div>
+        <div v-if="order.shippingAddress" class="order-shipping-address">
+          <MapPin :size="14" aria-hidden="true" />
+          <div><strong>{{ order.shippingAddress.receiver }} · {{ order.shippingAddress.phone }}</strong><span>{{ order.shippingAddress.province }}{{ order.shippingAddress.city }}{{ order.shippingAddress.district }}{{ order.shippingAddress.detail }}</span></div>
+        </div>
         <footer class="order-card-foot">
           <span v-if="order.status === 3" class="order-complete-note"><BadgeCheck :size="14" aria-hidden="true" /> 订单已完成</span>
           <span v-else class="order-foot-hint">{{ order.status === 2 ? '商品已交付，请确认收货' : order.status === 1 ? '订单已提交，等待后台交付' : '请完成支付后等待订单处理' }}</span>
@@ -156,9 +160,43 @@ onMounted(load);
 </template>
 
 <style scoped>
-.order-filter-list { display: flex; gap: 7px; overflow-x: auto; margin: -4px -14px 14px; padding: 4px 14px 6px; scrollbar-width: none; }
-.order-filter-list::-webkit-scrollbar { display: none; }
-.order-filter { gap: 6px; }
+.order-filter-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 3px 0 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.order-filter {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+.order-filter:hover { background: var(--surface); color: var(--brand); }
+.order-filter.active {
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 650;
+  box-shadow: var(--shadow-card);
+}
+.order-filter:focus-visible { outline: 2px solid color-mix(in srgb, var(--brand) 65%, transparent); outline-offset: 2px; }
 .order-result-count { margin: -4px 0 11px; color: var(--muted); font-size: 10px; }
 .order-list { display: grid; gap: 11px; }
 .order-card { overflow: hidden; padding: 15px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: var(--shadow-card); }
@@ -179,6 +217,11 @@ onMounted(load);
 .order-total strong { color: var(--text); font-family: var(--font-num); font-size: 13px; }
 .order-payment { display: flex; flex-wrap: wrap; gap: 5px 12px; padding: 10px 0; color: var(--muted); font-size: 10px; }
 .order-payment strong { color: var(--text); font-weight: 600; }
+.order-shipping-address { display: flex; align-items: flex-start; gap: 7px; padding: 10px 0; border-top: 1px solid var(--line); color: var(--muted); }
+.order-shipping-address svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent); }
+.order-shipping-address div { display: grid; min-width: 0; gap: 4px; }
+.order-shipping-address strong { color: var(--text-2); font-size: 10.5px; font-weight: 600; }
+.order-shipping-address span { color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .order-card-foot { min-height: 32px; border-top: 1px solid var(--line); padding-top: 10px; }
 .order-foot-hint, .order-complete-note { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .order-complete-note { color: var(--green); }

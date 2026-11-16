@@ -6,6 +6,7 @@ import { RedisService } from '../redis/redis.service';
 import type { Platform } from '@solar/shared';
 
 const CACHE_KEY = 'features:all';
+const SUPPORTED_PLATFORMS: readonly Platform[] = ['h5', 'app'];
 
 /**
  * 功能开关中心：三层控制
@@ -34,7 +35,8 @@ export class FeaturesService {
   }
 
   /** 前端启动时下发：已按 platform + rankLevel 过滤 */
-  async listForUser(platform: Platform = 'h5', rankLevel = 0) {
+  async listForUser(platform: string = 'h5', rankLevel = 0) {
+    this.validatePlatform(platform);
     const flags = await this.all();
     return flags
       .filter((f) => {
@@ -52,6 +54,7 @@ export class FeaturesService {
 
   /** 后端写接口二次校验，防止绕过前端直接调用 */
   async assertEnabled(code: string, platform: Platform = 'h5', rankLevel = 0): Promise<void> {
+    this.validatePlatform(platform);
     const flag = (await this.all()).find((f) => f.code === code);
     if (!flag || !flag.enabled) throw Err.featureDisabled(`功能「${code}」已关闭`);
     const platforms = flag.platforms as string[];
@@ -68,8 +71,33 @@ export class FeaturesService {
     return !!flag?.enabled;
   }
 
+  async isAvailable(code: string, platform: Platform = 'h5', rankLevel = 0): Promise<boolean> {
+    this.validatePlatform(platform);
+    const flag = (await this.all()).find((f) => f.code === code);
+    if (!flag?.enabled || rankLevel < flag.minRankLevel) return false;
+    const platforms = flag.platforms as string[];
+    return !Array.isArray(platforms) || platforms.length === 0 || platforms.includes(platform);
+  }
+
+  private validatePlatform(platform: string): asserts platform is Platform {
+    if (!SUPPORTED_PLATFORMS.includes(platform as Platform)) {
+      throw Err.param('平台标识仅支持 h5 或 app');
+    }
+  }
+
   /** 切换开关，立即失效缓存 */
   async toggle(code: string, enabled: boolean, platforms?: string[], minRankLevel?: number, operatorId?: bigint) {
+    if (typeof enabled !== 'boolean') throw Err.param('功能状态必须为布尔值');
+    if (platforms !== undefined) {
+      if (!Array.isArray(platforms) || platforms.some((platform) => !SUPPORTED_PLATFORMS.includes(platform as Platform))) {
+        throw Err.param('开放平台仅支持 h5 或 app');
+      }
+      platforms = [...new Set(platforms)];
+      if (platforms.length === SUPPORTED_PLATFORMS.length) platforms = [];
+    }
+    if (minRankLevel !== undefined && (!Number.isInteger(minRankLevel) || minRankLevel < 0 || minRankLevel > 6)) {
+      throw Err.param('最低可见等级必须为 0 至 6 的整数');
+    }
     const before = await this.prisma.featureFlag.findUnique({ where: { code } });
     const flag = await this.prisma.featureFlag.update({
       where: { code },

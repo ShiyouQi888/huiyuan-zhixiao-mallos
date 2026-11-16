@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { api, money } from '../api';
+import { useFeaturesStore } from '../stores/features';
 
 const summary = ref<any>(null);
 const records = ref<any[]>([]);
 const type = ref('');
-const TYPES = [
+const features = useFeaturesStore();
+const allTypes = [
   { v: '', l: '全部' }, { v: '1', l: '直推' }, { v: '2', l: '团队' },
   { v: '3', l: '平级' }, { v: '4', l: '领导' }, { v: '5', l: '分红' }, { v: '6', l: '调整' },
 ];
+const TYPES = computed(() => allTypes.filter((item) => item.v !== '5' || features.has('rank.dividend')));
 const NAMES: Record<number, string> = { 1:'直推奖',2:'团队奖',3:'平级奖',4:'领导奖',5:'分红池',6:'手工调整' };
 
 async function load() {

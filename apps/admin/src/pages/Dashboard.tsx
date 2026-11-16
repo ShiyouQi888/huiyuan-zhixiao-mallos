@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import {
   Activity, ArrowLeftRight, ArrowRight, ArrowUpRight, ChevronRight, CircleDollarSign,
   ClipboardCheck, RefreshCw, ShieldAlert, TrendingUp, Truck, Users, Wallet,
@@ -7,10 +8,11 @@ import {
 import { api, fmtDate, fmtMoney, getAdminRole } from '../api';
 import type { DashboardData } from '../types';
 import {
-  Badge, Button, Card, CardHeader, Empty, ErrorBlock, Meter, PageHeader, StatCard, TableSkeleton, cx,
+  Badge, Button, Card, CardHeader, Empty, ErrorBlock, PageHeader, StatCard, TableSkeleton, cx,
 } from '../components/ui';
 
 const RANK_NAMES = ['普通会员', '业务主任', '业务经理', '业务总监', '业务副总', '业务总经理', '业务总裁'];
+const RANK_COLORS = ['#ff5a1f', '#fb923c', '#fbbf24', '#d97706', '#b45309', '#7c2d12', '#a8a29e'];
 const ORDER_STATUS_LABELS = ['待支付', '已支付', '已交付', '已完成'];
 const ORDER_STATUS_TONES = ['warning', 'brand', 'info', 'success'] as const;
 
@@ -81,7 +83,15 @@ export function Dashboard() {
   const pendingRisk = data.pendingRiskEvents ?? 0;
   const totalPending = pendingDelivery + pendingApprovals + pendingTransfers + pendingRisk;
   const rankTotal = data.rankDistribution.reduce((sum, rank) => sum + rank.count, 0);
-  const maxCount = Math.max(1, ...data.rankDistribution.map((rank) => rank.count));
+  const rankCounts = new Map(data.rankDistribution.map((rank) => [rank.level, rank.count]));
+  const pieData = data.rankDistribution
+    .filter((rank) => rank.count > 0)
+    .map((rank) => ({
+      level: rank.level,
+      name: RANK_NAMES[rank.level] ?? `等级 ${rank.level}`,
+      count: rank.count,
+      color: RANK_COLORS[rank.level % RANK_COLORS.length],
+    }));
   const canOperate = !!role && ['SUPER_ADMIN', 'OPERATOR'].includes(role);
 
   const todoItems = [
@@ -205,22 +215,47 @@ export function Dashboard() {
             {data.rankDistribution.length === 0 ? (
               <Empty text="暂无等级数据" />
             ) : (
-              <div className="space-y-3">
-                {data.rankDistribution.map((rank) => {
-                  const percent = rankTotal > 0 ? (rank.count / rankTotal) * 100 : 0;
-                  return (
-                    <div key={rank.level}>
-                      <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
-                        <span className="truncate text-ink-soft">{RANK_NAMES[rank.level] ?? `等级 ${rank.level}`}</span>
-                        <span className="shrink-0 text-ink-muted">
-                          <span className="num font-medium text-ink">{rank.count.toLocaleString('zh-CN')}</span>
-                          <span className="ml-1.5 num text-2xs text-ink-faint">{percent.toFixed(1)}%</span>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="relative mx-auto h-[150px] w-[150px] shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        dataKey="count"
+                        nameKey="name"
+                        innerRadius={52}
+                        outerRadius={70}
+                        paddingAngle={2}
+                        stroke="none"
+                        startAngle={90}
+                        endAngle={-270}
+                        isAnimationActive={false}
+                      >
+                        {pieData.map((entry) => <Cell key={entry.level} fill={entry.color} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="num text-xl font-semibold leading-6 text-ink">{rankTotal.toLocaleString('zh-CN')}</span>
+                    <span className="mt-0.5 text-2xs text-ink-faint">会员总数</span>
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  {RANK_NAMES.map((name, level) => {
+                    const count = rankCounts.get(level) ?? 0;
+                    const percent = rankTotal > 0 ? (count / rankTotal) * 100 : 0;
+                    return (
+                      <div key={name} className="flex items-center gap-2 text-xs">
+                        <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: RANK_COLORS[level] }} aria-hidden="true" />
+                        <span className={count > 0 ? 'truncate text-ink-soft' : 'truncate text-ink-faint'}>{name}</span>
+                        <span className={cx('ml-auto num', count > 0 ? 'font-medium text-ink' : 'text-ink-faint')}>
+                          {count.toLocaleString('zh-CN')}
                         </span>
+                        <span className="w-10 shrink-0 text-right num text-2xs text-ink-faint">{percent.toFixed(1)}%</span>
                       </div>
-                      <Meter value={rank.count} max={maxCount} />
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

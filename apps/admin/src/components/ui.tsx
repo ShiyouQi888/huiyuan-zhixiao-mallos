@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Checkbox as TCheckbox, Input as TInput, Tag } from 'tdesign-react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Info, Inbox, Search, X,
 } from 'lucide-react';
@@ -51,13 +52,14 @@ export function TextInput({ className = '', type = 'text', value, defaultValue, 
   );
 }
 
-export function Checkbox({ children, checked, onChange }: {
+export function Checkbox({ children, checked, onChange, indeterminate }: {
   children?: ReactNode;
   checked: boolean;
+  indeterminate?: boolean;
   onChange: React.ChangeEventHandler<HTMLInputElement>;
 }) {
   return (
-    <TCheckbox checked={checked} onChange={(value) => onChange({ target: { checked: value } } as ChangeEvent<HTMLInputElement>)}>
+    <TCheckbox checked={checked} indeterminate={indeterminate} onChange={(value) => onChange({ target: { checked: value } } as ChangeEvent<HTMLInputElement>)}>
       {children}
     </TCheckbox>
   );
@@ -424,7 +426,7 @@ export function Pagination({ page, total, pageSize, onChange, disabled = false, 
             className={cx(
               'h-6 min-w-6 rounded-md px-1.5 text-xs tabular-nums transition',
               item === current
-                ? 'bg-accent text-white'
+                ? 'bg-accent text-accent-on'
                 : 'text-ink-3 hover:bg-hover hover:text-ink',
             )}
           >
@@ -525,7 +527,7 @@ export function Modal({ open = true, onClose, title, description, children, foot
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       className="modal-backdrop"
       onClick={closeOnBackdrop ? onClose : undefined}
@@ -551,7 +553,8 @@ export function Modal({ open = true, onClose, title, description, children, foot
         {children && <div className="modal-body">{children}</div>}
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -577,7 +580,7 @@ export function Drawer({ open = true, onClose, title, description, children, foo
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="drawer-backdrop" onClick={onClose} role="presentation">
       <section
         className="drawer-panel"
@@ -599,7 +602,8 @@ export function Drawer({ open = true, onClose, title, description, children, foo
         <div className="drawer-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -666,7 +670,7 @@ export function Toast({ message, onClose, tone = 'info' }: {
     return () => window.clearTimeout(timer);
   }, [message, onClose]);
 
-  return (
+  return createPortal(
     <div className="toast-wrap">
       <div className="toast" role="status" aria-live="polite">
         {TOAST_ICONS[tone]}
@@ -675,7 +679,8 @@ export function Toast({ message, onClose, tone = 'info' }: {
           <X size={14} />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

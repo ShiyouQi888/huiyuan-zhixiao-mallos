@@ -163,6 +163,9 @@ importers:
 
   apps/member:
     dependencies:
+      '@province-city-china/level':
+        specifier: 9.0.0
+        version: 9.0.0
       '@solar/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -1238,6 +1241,16 @@ packages:
     resolution: {integrity: sha512-pHhpQdr1UPFpt+zFfnPazhulaZYCUqeIcPpJViYoq9R+D/yw4fjE+CtnsnKzPYm0ddUbeXUzjGVGIRVgPDCk4Q==}
     dependencies:
       '@prisma/debug': 5.22.0
+
+  /@province-city-china/level@9.0.0:
+    resolution: {integrity: sha512-Yuxsv2nUzaYTt03kU9ZGDVtCtOGH4h5weiOvWKfMqJ6cnjhPvFamKgO6BCRs927H7zy4Vlk7NKvdl7VEdxC/MQ==}
+    dependencies:
+      '@province-city-china/types': 9.0.0
+    dev: false
+
+  /@province-city-china/types@9.0.0:
+    resolution: {integrity: sha512-MXwAX38GdT7OYY3c2kIWUvBOGFxDhqV0ONEL8Bbgy3vF/ckPc0WTRx6uShUV/WK0PEAUubk3chqszHzgkO/W0A==}
+    dev: false
 
   /@remix-run/router@1.23.4:
     resolution: {integrity: sha512-q7j5geK7xs3UJSdm9/iytUNclBnLmYx1EnSeCFXHPeutdqgIMeFeHtUZgS3EhlKxdBEAu8OwtJCwmLrEzpSs7Q==}

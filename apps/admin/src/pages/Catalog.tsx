@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Eye, EyeOff, Image as ImageIcon, Link2, Package, Plus, Trash2, X } from 'lucide-react';
 import { api, fmtMoney, patch, post, put, del, resolveAssetUrl } from '../api';
 import {
-  Badge, Button, Card, Checkbox, Drawer, Empty, Field, FilterBar, PageHeader, SearchField, SelectField,
+  Badge, Button, Card, Checkbox, Drawer, Empty, Field, FilterBar, PageHeader, Pagination, SearchField, SelectField,
   SectionLabel, TextInput, Toast, useConfirm,
 } from '../components/ui';
 import { FileManager } from './FileManager';
@@ -33,11 +34,15 @@ export function Catalog() {
   const [keyword, setKeyword] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<any>(null);
   const [picker, setPicker] = useState<'images' | 'details' | null>(null);
   const [toast, setToast] = useState('');
   const [toastTone, setToastTone] = useState<'success' | 'error' | 'info'>('info');
   const { confirm, confirmNode } = useConfirm();
+  const PAGE_SIZE = 20;
 
   const notify = (message: string, tone: 'success' | 'error' | 'info' = 'info') => {
     setToast(message);
@@ -45,13 +50,19 @@ export function Catalog() {
   };
 
   const load = () => {
-    const q = new URLSearchParams();
+    const q = new URLSearchParams({ page: String(page) });
     if (keyword) q.set('keyword', keyword);
     if (categoryId) q.set('categoryId', categoryId);
     if (status !== '') q.set('status', status);
-    api<{ list: Product[] }>(`/admin/catalog/products?${q}`).then((r) => setProducts(r.list ?? [])).catch((e) => notify(e.message, 'error'));
+    api<{ list: Product[]; total?: number }>(`/admin/catalog/products?${q}`)
+      .then((r) => {
+        setProducts(r.list ?? []);
+        setTotal(r.total ?? r.list?.length ?? 0);
+      })
+      .catch((e) => notify(e.message, 'error'));
   };
-  useEffect(load, [keyword, categoryId, status]);
+  useEffect(load, [keyword, categoryId, status, page]);
+  useEffect(() => { setSelected([]); }, [keyword, categoryId, status, page]);
   useEffect(() => {
     api<any[]>('/admin/catalog/categories?all=true').then(setCategories).catch(() => {});
     api<any[]>('/admin/packages').then(setPackages).catch(() => {});
@@ -113,6 +124,24 @@ export function Catalog() {
     } catch (e: any) { notify(e.message, 'error'); }
   };
 
+  const bulkStatus = async (nextStatus: number) => {
+    const agreed = await confirm({
+      title: `批量${nextStatus === 1 ? '上架' : '下架'} ${selected.length} 件商品？`,
+      description: nextStatus === 1
+        ? '上架后商品将立即在会员端商城可见。'
+        : '下架后商品将从会员端商城隐藏，已下单订单不受影响。',
+      confirmText: nextStatus === 1 ? '批量上架' : '批量下架',
+      tone: nextStatus === 1 ? 'primary' : 'danger',
+    });
+    if (!agreed) return;
+    try {
+      await patch('/admin/catalog/products/status', { ids: selected, status: nextStatus });
+      notify(`已${nextStatus === 1 ? '上架' : '下架'} ${selected.length} 件商品`, 'success');
+      setSelected([]);
+      load();
+    } catch (e: any) { notify(e.message, 'error'); }
+  };
+
   const remove = async (p: Product) => {
     const agreed = await confirm({
       title: `删除商品「${p.name}」？`,
@@ -132,6 +161,12 @@ export function Catalog() {
     setEditing({ ...editing, packageIds: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] });
   };
 
+  const allSelected = products.length > 0 && products.every((p) => selected.includes(p.id));
+  const toggleAll = () => setSelected(allSelected ? [] : products.map((p) => p.id));
+  const toggleSelected = (id: string) => {
+    setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+
   return (
     <>
       <PageHeader
@@ -146,13 +181,13 @@ export function Catalog() {
             className="w-full sm:w-[260px]"
             placeholder="搜索商品名称"
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            onChange={(e) => { setPage(1); setKeyword(e.target.value); }}
           />
           <SelectField
             ariaLabel="商品分类筛选"
             className="w-[148px]"
             value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
+            onChange={(e) => { setPage(1); setCategoryId(e.target.value); }}
             options={[
               { value: '', label: '全部分类' },
               ...categories.filter((c) => !c.parentId).map((c) => ({ value: String(c.id), label: c.name })),
@@ -162,7 +197,7 @@ export function Catalog() {
             ariaLabel="商品状态筛选"
             className="w-[124px]"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => { setPage(1); setStatus(e.target.value); }}
             options={[
               { value: '', label: '全部状态' },
               { value: '1', label: '已上架' },
@@ -170,12 +205,29 @@ export function Catalog() {
             ]}
           />
           {(keyword || categoryId || status !== '') && (
-            <Button size="sm" variant="ghost" onClick={() => { setKeyword(''); setCategoryId(''); setStatus(''); }}>重置筛选</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setKeyword(''); setCategoryId(''); setStatus(''); setPage(1); }}>重置筛选</Button>
           )}
           <div className="ml-auto text-xs text-ink-faint">
-            共 <span className="num text-ink-soft">{products.length}</span> 件商品
+            共 <span className="num text-ink-soft">{total}</span> 件商品
           </div>
         </FilterBar>
+
+        {selected.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-accent-soft px-4 py-2">
+            <span className="text-xs text-accent-ink">
+              已选 <span className="num font-medium">{selected.length}</span> 件商品
+            </span>
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              <Button size="xs" variant="secondary" onClick={() => void bulkStatus(1)}>
+                <Eye size={13} /> 批量上架
+              </Button>
+              <Button size="xs" variant="secondary" onClick={() => void bulkStatus(0)}>
+                <EyeOff size={13} /> 批量下架
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => setSelected([])}>取消选择</Button>
+            </div>
+          </div>
+        )}
 
         {products.length === 0 ? (
           <Empty
@@ -189,6 +241,9 @@ export function Catalog() {
             <table className="admin-table">
               <thead>
                 <tr>
+                  <th className="th w-9">
+                    <Checkbox checked={allSelected} indeterminate={selected.length > 0 && !allSelected} onChange={toggleAll} />
+                  </th>
                   <th className="th">商品</th>
                   <th className="th">分类</th>
                   <th className="th text-right">价格</th>
@@ -201,6 +256,9 @@ export function Catalog() {
               <tbody>
                 {products.map((p) => (
                   <tr key={p.id} className="admin-row">
+                    <td className="td">
+                      <Checkbox checked={selected.includes(p.id)} onChange={() => toggleSelected(p.id)} />
+                    </td>
                     <td className="td">
                       <div className="flex items-center gap-3">
                         {p.images?.[0] ? (
@@ -277,6 +335,8 @@ export function Catalog() {
             </table>
           </div>
         )}
+
+        <Pagination page={page} total={total} pageSize={PAGE_SIZE} onChange={setPage} unit="件商品" />
       </Card>
 
       <Drawer
@@ -402,7 +462,9 @@ export function Catalog() {
                     <div
                       key={p.id}
                       className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition ${
-                        bound ? 'border-accent/40 bg-accent-soft' : 'border-line bg-panel'
+                        bound
+                          ? 'border-accent/40 border-l-2 border-l-accent bg-raised'
+                          : 'border-line bg-panel hover:border-line-strong'
                       }`}
                     >
                       <Checkbox checked={bound} onChange={() => togglePackage(p.id)} />
@@ -431,7 +493,7 @@ export function Catalog() {
         )}
       </Drawer>
 
-      {picker && (
+      {picker && createPortal(
         <div className="fixed inset-0 z-[70] flex flex-col bg-canvas p-5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -451,7 +513,8 @@ export function Catalog() {
               }}
             />
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {confirmNode}

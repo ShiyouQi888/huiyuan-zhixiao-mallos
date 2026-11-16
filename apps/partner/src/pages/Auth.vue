@@ -2,10 +2,12 @@
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api';
+import { useFeaturesStore } from '../stores/features';
 import { ShieldCheck } from 'lucide-vue-next';
 
 const route = useRoute();
 const router = useRouter();
+const features = useFeaturesStore();
 const message = ref('正在验证身份…');
 
 onMounted(async () => {
@@ -16,6 +18,7 @@ onMounted(async () => {
     return;
   }
   localStorage.setItem('solar_member_token', token);
+  features.reset();
   sessionStorage.removeItem('solar_partner_checked');
   try {
     const res = await fetch(`${(import.meta.env.VITE_API_BASE_URL as string) ?? 'http://localhost:3000/api'}/access/partner/check`, {

@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { FeaturesService } from '../features/features.service';
 import { CatalogService, type ProductInput } from './catalog.service';
 
 /** 管理端商品目录 */
@@ -127,18 +128,19 @@ export class CatalogController {
 /** 会员端商品浏览 */
 @Controller('api/products')
 export class MemberProductController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(private readonly catalog: CatalogService, private readonly features: FeaturesService) {}
 
   @Get()
   async list(
+    @CurrentUser() current: CurrentUserPayload,
     @Query('categoryId') categoryId?: string,
-    @CurrentUser('id') userId?: bigint,
     @Query('packageId') packageId?: string,
   ) {
+    await this.features.assertEnabled('product.mall', 'h5', current.rankLevel);
     let resolvedPackageId = packageId ? Number(packageId) : null;
-    if (!resolvedPackageId && userId) {
+    if (!resolvedPackageId) {
       const user = await this.catalog['prisma'].user.findUnique({
-        where: { id: userId }, select: { packageId: true },
+        where: { id: current.id }, select: { packageId: true },
       });
       resolvedPackageId = user?.packageId ?? null;
     }
@@ -146,7 +148,8 @@ export class MemberProductController {
   }
 
   @Get(':id')
-  detail(@Param('id') id: string) {
+  async detail(@Param('id') id: string, @CurrentUser() current: CurrentUserPayload) {
+    await this.features.assertEnabled('product.mall', 'h5', current.rankLevel);
     return this.catalog.productDetail(BigInt(id));
   }
 }

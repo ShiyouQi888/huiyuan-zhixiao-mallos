@@ -39,7 +39,7 @@ function Protected() {
 
 export default function App() {
   return (
-    <Suspense fallback={<div className="grid min-h-screen place-items-center bg-surface-950 text-sm text-slate-500">页面加载中…</div>}>
+    <Suspense fallback={<div className="grid min-h-screen place-items-center bg-canvas text-sm text-ink-faint">页面加载中…</div>}>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<Protected />}>

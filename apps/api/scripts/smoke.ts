@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   const adminMe = await api<any>('/api/me', { token: admin.token });
   const features = await api<{ features: any[] }>('/api/features?platform=h5', { token: admin.token });
-  check('功能开关下发 16 项', features.features.length === 16, features.features.length);
+  check('功能开关下发 19 项', features.features.length === 19, features.features.length);
 
   // 2. 注册两级用户
   console.log('\n[2] 注册与关系绑定');

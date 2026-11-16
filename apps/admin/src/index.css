@@ -34,13 +34,15 @@
   --ink-4: #98a2b3;
   --ink-rgb: 17 24 38;
 
-  /* 品牌 */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-ink: #4338ca;
-  --accent-soft: #eef2ff;
-  --accent-soft-strong: #e0e7ff;
-  --accent-rgb: 79 70 229;
+  /* 品牌（太阳橙，基准取自 apps/member/src/styles.css；实心底色加深以满足白字对比度） */
+  --accent: #c9460c;
+  --accent-hover: #b03a07;
+  --accent-ink: #b03a07;
+  --accent-soft: #fff1ea;
+  --accent-soft-strong: #ffe2d4;
+  --accent-rgb: 201 70 12;
+  --accent-bright: #ff5a1f;
+  --on-accent: #ffffff;
 
   /* 状态 */
   --success: #067647;
@@ -66,12 +68,23 @@
   --shadow-pop: 0 20px 40px -12px rgba(16, 24, 40, 0.18), 0 4px 10px -4px rgba(16, 24, 40, 0.08);
   --overlay: rgba(16, 24, 40, 0.45);
 
-  /* TDesign 对齐 */
-  --td-brand-color: #4f46e5;
-  --td-brand-color-hover: #4338ca;
-  --td-brand-color-focus: #6366f1;
-  --td-brand-color-active: #3730a3;
-  --td-brand-color-light: #eef2ff;
+  /* TDesign 对齐：整条品牌色阶都指向太阳橙，避免回落到默认蓝 */
+  --td-brand-color-1: #fff3ed;
+  --td-brand-color-2: #ffe2d4;
+  --td-brand-color-3: #ffc7ad;
+  --td-brand-color-4: #ffa982;
+  --td-brand-color-5: #ff8a5c;
+  --td-brand-color-6: #ff7a45;
+  --td-brand-color-7: #e2480d;
+  --td-brand-color-8: #c9460c;
+  --td-brand-color-9: #b03a07;
+  --td-brand-color-10: #983006;
+  --td-brand-color: #c9460c;
+  --td-brand-color-hover: #b03a07;
+  --td-brand-color-focus: #e2480d;
+  --td-brand-color-active: #983006;
+  --td-brand-color-disabled: #ffc7ad;
+  --td-brand-color-light: #fff1ea;
   --td-bg-color-container: #ffffff;
   --td-bg-color-container-hover: #f2f4f7;
   --td-bg-color-secondarycontainer: #f8f9fb;
@@ -106,12 +119,14 @@
   --ink-4: #5f6b7c;
   --ink-rgb: 233 237 244;
 
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --accent-ink: #a5b4fc;
-  --accent-soft: rgba(99, 102, 241, 0.14);
-  --accent-soft-strong: rgba(99, 102, 241, 0.22);
-  --accent-rgb: 99 102 241;
+  --accent: #ff7a45;
+  --accent-hover: #ff9463;
+  --accent-ink: #ffa982;
+  --accent-soft: rgba(255, 90, 31, 0.14);
+  --accent-soft-strong: rgba(255, 90, 31, 0.22);
+  --accent-rgb: 255 122 69;
+  --accent-bright: #ff7a45;
+  --on-accent: #1c0f07;
 
   --success: #6ce9a6;
   --success-solid: #32d583;
@@ -135,11 +150,22 @@
   --shadow-pop: 0 24px 48px -12px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
   --overlay: rgba(3, 6, 12, 0.66);
 
-  --td-brand-color: #818cf8;
-  --td-brand-color-hover: #a5b4fc;
-  --td-brand-color-focus: #6366f1;
-  --td-brand-color-active: #6366f1;
-  --td-brand-color-light: rgba(99, 102, 241, 0.16);
+  --td-brand-color-1: rgba(255, 122, 69, 0.08);
+  --td-brand-color-2: rgba(255, 122, 69, 0.14);
+  --td-brand-color-3: rgba(255, 122, 69, 0.2);
+  --td-brand-color-4: rgba(255, 122, 69, 0.3);
+  --td-brand-color-5: #ff9d70;
+  --td-brand-color-6: #ff9463;
+  --td-brand-color-7: #ff8a52;
+  --td-brand-color-8: #ff7a45;
+  --td-brand-color-9: #ff5a1f;
+  --td-brand-color-10: #f0480f;
+  --td-brand-color: #ff7a45;
+  --td-brand-color-hover: #ff9463;
+  --td-brand-color-focus: #ff8a52;
+  --td-brand-color-active: #ff5a1f;
+  --td-brand-color-disabled: rgba(255, 122, 69, 0.4);
+  --td-brand-color-light: rgba(255, 90, 31, 0.16);
   --td-bg-color-container: #121821;
   --td-bg-color-container-hover: #1c2431;
   --td-bg-color-secondarycontainer: #171e29;
@@ -286,7 +312,7 @@ input, select, textarea { font-family: inherit; }
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: var(--shadow-xs);
 }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
@@ -402,50 +428,9 @@ input, select, textarea { font-family: inherit; }
 }
 .search-field .input { padding-left: 32px; }
 
-/* TDesign 输入框对齐设计令牌 */
-.t-input {
-  height: 34px;
-  padding: 0 10px;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.t-input:hover { border-color: var(--ink-4); }
-.t-input.t-is-focused {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.14);
-}
-.t-input__wrap { border: none; background: transparent; }
-.t-input__inner {
-  height: 32px;
-  color: var(--ink);
-  font-size: 13px;
-  background: transparent;
-}
-.t-input__inner::placeholder { color: var(--ink-4); }
-.t-input .t-input__suffix,
-.t-input .t-input__prefix { color: var(--ink-4); }
-.t-checkbox { align-items: center; }
-.t-checkbox__label { font-size: 13px; color: var(--ink-2); padding-left: 8px; }
-.t-checkbox__input { border-color: var(--line-strong); }
-
-/* TDesign Tag 作为徽标底座 */
-.t-tag.badge {
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1;
-}
-.t-tag.badge.badge-neutral { background: var(--raised); border-color: var(--line); color: var(--ink-2); }
-.t-tag.badge.badge-brand { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); }
-.t-tag.badge.badge-success { background: var(--success-soft); border-color: var(--success-line); color: var(--success); }
-.t-tag.badge.badge-warning { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
-.t-tag.badge.badge-danger { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
-.t-tag.badge.badge-info { background: var(--info-soft); border-color: var(--info-line); color: var(--info); }
+/* TDesign 控件覆盖见文件末尾「TDesign 控件品牌化」裸 CSS 段。
+   注意：必须放在 @layer components 之外，否则 Tailwind JIT 会因运行时类名
+   （.t-is-checked 等）不在源码中出现而把整段规则裁剪掉，导致回落到默认蓝。 */
 
 /* ============================================================
    表格
@@ -457,7 +442,7 @@ input, select, textarea { font-family: inherit; }
   font-size: 13px;
 }
 .admin-table .th {
-  padding: 9px 14px;
+  padding: 8px 14px;
   background: var(--raised);
   border-bottom: 1px solid var(--line);
   color: var(--ink-3);
@@ -470,10 +455,10 @@ input, select, textarea { font-family: inherit; }
 .admin-table .th:first-child { padding-left: 16px; }
 .admin-table .th:last-child { padding-right: 16px; }
 .admin-table .td {
-  padding: 11px 14px;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--line);
   color: var(--ink-2);
-  line-height: 20px;
+  line-height: 19px;
   vertical-align: middle;
 }
 .admin-table .td:first-child { padding-left: 16px; }
@@ -482,7 +467,7 @@ input, select, textarea { font-family: inherit; }
 .admin-table tbody tr { transition: background-color 0.12s ease; }
 .admin-table .admin-row:hover { background: var(--hover); }
 .admin-table .cell-strong { color: var(--ink); font-weight: 500; }
-.admin-table .cell-muted { color: var(--ink-4); font-size: 12px; }
+.admin-table .cell-muted { color: var(--ink-4); font-size: 11.5px; line-height: 15px; }
 .admin-row { cursor: default; }
 .table-wrap { width: 100%; overflow-x: auto; }
 .table-empty { padding: 56px 16px; }
@@ -668,7 +653,7 @@ input, select, textarea { font-family: inherit; }
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: min(90vh, 860px);
+  max-height: min(calc(100dvh - 32px), 860px);
   overflow: hidden;
   background: var(--card);
   border: 1px solid var(--line);
@@ -678,15 +663,17 @@ input, select, textarea { font-family: inherit; }
 }
 .modal-header {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--line);
 }
-.modal-body { padding: 18px 20px; overflow-y: auto; }
+.modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 20px; }
 .modal-footer {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -728,6 +715,7 @@ input, select, textarea { font-family: inherit; }
   display: flex;
   flex-direction: column;
   height: 100%;
+  max-height: 100dvh;
   width: 100%;
   background: var(--card);
   border-left: 1px solid var(--line);
@@ -742,7 +730,7 @@ input, select, textarea { font-family: inherit; }
   padding: 16px 20px;
   border-bottom: 1px solid var(--line);
 }
-.drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+.drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 20px; }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: 0.4; } to { transform: translateX(0); opacity: 1; } }
 
 .toast-wrap {
@@ -851,7 +839,9 @@ input, select, textarea { font-family: inherit; }
 }
 
 /* 页面进入动画 */
-.page-enter { animation: page-in 0.22s ease both; }
+/* 注意：不要使用 fill-mode: both。持久化的 transform 会让 fixed 弹窗/遮罩
+   相对内容区定位，导致遮罩只覆盖主内容并压住页面。 */
+.page-enter { animation: page-in 0.22s ease; }
 @keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
 } /* @layer components */
@@ -875,4 +865,138 @@ input, select, textarea { font-family: inherit; }
    兼容：品牌标记
    ============================================================ */
 .brand-mark,
-.brand-mark * { color: #fff !important; }
+.brand-mark * { color: var(--on-accent) !important; }
+
+/* 登录页品牌面板：大面积橙色底，使用加深渐变保证白字对比度 */
+.login-brand-panel {
+  background: linear-gradient(150deg, #e2480d 0%, #c9460c 55%, #a63a08 100%);
+  color: #fff;
+}
+.login-brand-panel .brand-mark,
+.login-brand-panel .brand-mark * { color: #fff !important; }
+
+/* ============================================================
+   TDesign 控件品牌化（裸 CSS，禁止移回 @layer）
+   Tailwind JIT 会裁剪 @layer 内未被源码引用的运行时类名选择器，
+   因此 TDesign 的 .t-* 覆盖必须留在层级之外。
+   ============================================================ */
+
+/* 输入框：对齐设计令牌，聚焦使用品牌色 */
+.t-input {
+  height: 34px;
+  padding: 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.t-input:hover { border-color: var(--ink-4); }
+.t-input.t-is-focused,
+.t-input--focused {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.14) !important;
+}
+.t-input.t-is-error { border-color: var(--danger-solid); }
+.t-input.t-is-success { border-color: var(--success-solid); }
+.t-input__wrap { border: none; background: transparent; }
+.t-input__inner {
+  height: 32px;
+  color: var(--ink);
+  font-size: 13px;
+  background: transparent;
+}
+.t-input__inner::placeholder { color: var(--ink-4); }
+.t-input .t-input__suffix,
+.t-input .t-input__prefix { color: var(--ink-4); }
+
+/* 勾选框 */
+.t-checkbox { align-items: center; }
+.t-checkbox__label { font-size: 13px; color: var(--ink-2); padding-left: 8px; }
+.t-checkbox__input {
+  background-color: var(--panel);
+  border-color: var(--line-strong);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.t-checkbox:hover .t-checkbox__input { border-color: var(--accent); }
+.t-checkbox.t-is-checked .t-checkbox__input,
+.t-checkbox.t-is-indeterminate .t-checkbox__input {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.t-checkbox.t-is-checked:hover .t-checkbox__input,
+.t-checkbox.t-is-indeterminate:hover .t-checkbox__input {
+  background-color: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+.t-checkbox.t-is-checked .t-checkbox__input::after,
+.t-checkbox.t-is-indeterminate .t-checkbox__input::after { border-color: var(--on-accent) !important; }
+.t-checkbox.t-is-disabled .t-checkbox__input { background-color: var(--raised) !important; border-color: var(--line) !important; }
+.t-checkbox.t-is-disabled .t-checkbox__label { color: var(--ink-4); }
+
+/* 单选框 */
+.t-radio__input { background-color: var(--panel); border-color: var(--line-strong); }
+.t-radio:hover .t-radio__input { border-color: var(--accent); }
+.t-radio.t-is-checked .t-radio__input { border-color: var(--accent) !important; }
+.t-radio.t-is-checked .t-radio__input::after { background-color: var(--accent) !important; }
+.t-radio.t-is-checked .t-radio__label { color: var(--ink); }
+
+/* 开关 */
+.t-switch { background-color: var(--line-strong); }
+.t-switch:hover { background-color: var(--ink-4); }
+.t-switch.t-is-checked { background-color: var(--accent) !important; }
+.t-switch.t-is-checked:hover { background-color: var(--accent-hover) !important; }
+.t-switch.t-is-checked::after { background-color: #ffffff; }
+
+/* 按钮 / 链接：不允许出现 TDesign 默认蓝 */
+.t-button--theme-primary {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--on-accent) !important;
+}
+.t-button--theme-primary:hover,
+.t-button--theme-primary:focus,
+.t-button--theme-primary:active {
+  background-color: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+.t-button--theme-primary:focus-visible { box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.2) !important; }
+.t-button--variant-text.t-button--theme-primary,
+.t-button--variant-outline.t-button--theme-primary { color: var(--accent-ink) !important; }
+.t-button--variant-outline.t-button--theme-primary { border-color: var(--accent) !important; background-color: transparent !important; }
+.t-button--variant-outline.t-button--theme-primary:hover { background-color: var(--accent-soft) !important; }
+.t-link { color: var(--accent-ink) !important; }
+.t-link:hover { color: var(--accent-hover) !important; }
+.t-link:focus-visible { box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.2) !important; border-radius: 4px; }
+
+/* 原生控件（含未来直接使用的 input）统一品牌色 */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+input[type='month'],
+input[type='week'],
+select,
+progress { accent-color: var(--accent); }
+
+/* 原生下拉/日期弹层：选中项与日期高亮尽量使用品牌橙，避免系统蓝 */
+select option { background-color: var(--panel); color: var(--ink); }
+select option:checked { background-color: var(--accent); color: var(--on-accent); }
+
+/* TDesign Tag 作为徽标底座 */
+.t-tag.badge {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+}
+.t-tag.badge.badge-neutral { background: var(--raised); border-color: var(--line); color: var(--ink-2); }
+.t-tag.badge.badge-brand { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); }
+.t-tag.badge.badge-success { background: var(--success-soft); border-color: var(--success-line); color: var(--success); }
+.t-tag.badge.badge-warning { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
+.t-tag.badge.badge-danger { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.t-tag.badge.badge-info { background: var(--info-soft); border-color: var(--info-line); color: var(--info); }

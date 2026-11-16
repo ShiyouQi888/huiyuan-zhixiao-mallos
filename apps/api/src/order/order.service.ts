@@ -11,6 +11,7 @@ export interface CreateOrderParams {
   type: number;              // 1 新购 2 升级 3 复消 4 普通商品
   packageId?: number;
   productId?: bigint;
+  addressId?: bigint;
   quantity?: number;
   useEquity?: boolean;
   useBalance?: boolean;
@@ -40,6 +41,7 @@ export class OrderService {
 
     let amount = 0n;
     let packageRow: { id: number; price: bigint; equityValue: bigint; durationDays: number } | null = null;
+    let shippingAddress: { receiver: string; phone: string; province: string; city: string; district: string; detail: string } | null = null;
 
     if (params.type === 1 || params.type === 2 || params.type === 3) {
       const pkg = await this.prisma.package.findUnique({ where: { id: params.packageId ?? 0 } });
@@ -68,6 +70,17 @@ export class OrderService {
       const priceBind = user.packageId ? product.packageBinds.find((bind) => bind.packageId === user.packageId) : undefined;
       const productPrice = priceBind?.exclusivePrice ?? product.price;
       amount = productPrice * BigInt(quantity);
+      if (!params.addressId) throw Err.param('购买实物商品前请先选择收货地址');
+      const address = await this.prisma.userAddress.findFirst({ where: { id: params.addressId, userId: params.userId } });
+      if (!address) throw Err.notFound('收货地址不存在，请刷新后重新选择');
+      shippingAddress = {
+        receiver: address.receiver,
+        phone: address.phone,
+        province: address.province,
+        city: address.city,
+        district: address.district,
+        detail: address.detail,
+      };
     } else {
       throw Err.param('订单类型不合法');
     }
@@ -104,6 +117,7 @@ export class OrderService {
         equityDeduct,
         balanceDeduct,
         cashPay,
+        ...(shippingAddress ? { shippingAddress: shippingAddress as never } : {}),
         status: 1, // PAID
         parentIdSnapshot: user.parentId,
         remark: params.remark,
@@ -217,12 +231,13 @@ export class OrderService {
     return this.prisma.order.findUnique({ where: { id: order.id } });
   }
 
-  async detail(orderNo: string) {
+  async detail(orderNo: string, userId?: bigint) {
     const order = await this.prisma.order.findUnique({
       where: { orderNo },
       include: { items: true, performance: true, bonusPlan: true },
     });
     if (!order) throw Err.notFound('订单不存在');
+    if (userId && order.userId !== userId) throw Err.forbidden('无权查看该订单');
     return order;
   }
 

@@ -265,7 +265,7 @@ export class AdminController {
     @Body() body: { enabled: boolean; platforms?: string[]; minRankLevel?: number },
     @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.featureFlags.toggle(code, !!body.enabled, body.platforms, body.minRankLevel, user.id);
+    return this.featureFlags.toggle(code, body.enabled, body.platforms, body.minRankLevel, user.id);
   }
 
   /** 虚拟货币发行总账：累计发行 / 流通 / 已消费或过期 / 沉淀 */

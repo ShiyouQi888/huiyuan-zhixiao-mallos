@@ -5,6 +5,7 @@ import { EquityService } from '../equity/equity.service';
 import { FeaturesService } from '../features/features.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
+import { UserService } from '../user/user.service';
 
 /** 会员间转账：钱包余额 / 权益值，均需接收方 24h 内确认 */
 @Injectable()
@@ -15,6 +16,7 @@ export class TransferService {
     private readonly equity: EquityService,
     private readonly features: FeaturesService,
     private readonly config: ConfigService,
+    private readonly users: UserService,
   ) {}
 
   private async parties(fromId: bigint, toPhone: string) {
@@ -77,8 +79,9 @@ export class TransferService {
 
   /* ---------------- 钱包余额转账 ---------------- */
 
-  async createWalletTransfer(fromId: bigint, toPhone: string, amount: bigint, remark?: string) {
+  async createWalletTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string) {
     await this.features.assertEnabled('wallet.transfer');
+    await this.users.verifyTransferPassword(fromId, paymentPassword);
     await this.checkAmount(amount);
     const { from, to } = await this.parties(fromId, toPhone);
     const riskFlag = await this.checkRisk(from, to, amount, 'wallet');
@@ -107,8 +110,9 @@ export class TransferService {
 
   /* ---------------- 权益值转账 ---------------- */
 
-  async createEquityTransfer(fromId: bigint, toPhone: string, amount: bigint, remark?: string) {
+  async createEquityTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string) {
     await this.features.assertEnabled('equity.transfer');
+    await this.users.verifyTransferPassword(fromId, paymentPassword);
     await this.checkAmount(amount);
     const { from, to } = await this.parties(fromId, toPhone);
     const riskFlag = await this.checkRisk(from, to, amount, 'equity');

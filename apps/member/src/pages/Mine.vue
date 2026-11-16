@@ -1,24 +1,27 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, money } from '../api';
 import { useUserStore } from '../stores/user';
 import { Toast } from './_toast';
 import AppModal from '../components/AppModal.vue';
-import { ArrowRight, BadgeCheck, ChevronRight, Crown, ShieldCheck, ShoppingBag, WalletCards } from 'lucide-vue-next';
+import { ArrowRight, BadgeCheck, ChevronRight, Crown, KeyRound, MapPin, ShieldCheck, ShoppingBag, WalletCards } from 'lucide-vue-next';
 
 const store = useUserStore();
 const router = useRouter();
 const showRealname = ref(false);
 const realName = ref('');
 const idCard = ref('');
+const canSeeWallet = computed(() => store.has('wallet.account'));
+const canSeeEquity = computed(() => store.has('equity.account'));
+const canSeeAssets = computed(() => canSeeWallet.value || canSeeEquity.value || store.has('token.view'));
 
 onMounted(() => store.loadProfile().catch(() => {}));
 
 async function submitRealname() {
   try {
     await api('/me/realname', { method: 'POST', body: { realName: realName.value, idCard: idCard.value } });
-    store.profile.realNameStatus = 1;
+    if (store.profile) store.profile.realNameStatus = 1;
     showRealname.value = false;
     Toast('实名认证成功', 'success');
   } catch (e: any) { Toast(e.message, 'danger'); }
@@ -70,14 +73,14 @@ function logout() {
       <ArrowRight :size="17" aria-hidden="true" />
     </button>
 
-    <div class="profile-assets">
-      <button type="button" class="profile-asset-card" @click="router.push('/assets')">
+    <div v-if="canSeeAssets && (canSeeWallet || canSeeEquity)" class="profile-assets" :class="{ 'profile-assets--single': canSeeWallet !== canSeeEquity }">
+      <button v-if="canSeeWallet" type="button" class="profile-asset-card" @click="router.push('/assets')">
         <span class="profile-asset-icon"><WalletCards :size="17" aria-hidden="true" /></span>
         <div>
           <small>钱包余额</small><strong>¥{{ money(store.profile?.wallet?.balance) }}</strong>
         </div>
       </button>
-      <button type="button" class="profile-asset-card profile-asset-card--equity" @click="router.push('/assets')">
+      <button v-if="canSeeEquity" type="button" class="profile-asset-card profile-asset-card--equity" @click="router.push('/assets')">
         <span class="profile-asset-icon"><BadgeCheck :size="17" aria-hidden="true" /></span>
         <div><small>可用权益值</small><strong>{{ money(store.profile?.equityAccount?.balance) }}</strong></div>
       </button>
@@ -85,8 +88,10 @@ function logout() {
 
     <nav class="account-menu" aria-label="账户服务">
       <router-link to="/orders" class="account-menu-item"><span class="account-menu-icon"><ShoppingBag :size="17" aria-hidden="true" /></span><span>我的订单</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
-      <router-link to="/assets" class="account-menu-item"><span class="account-menu-icon"><WalletCards :size="17" aria-hidden="true" /></span><span>资产中心与转账</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
-      <button type="button" class="account-menu-item" :disabled="store.profile?.realNameStatus === 1" @click="showRealname = true">
+      <router-link v-if="canSeeAssets" to="/assets" class="account-menu-item"><span class="account-menu-icon"><WalletCards :size="17" aria-hidden="true" /></span><span>资产中心</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
+      <router-link v-if="store.has('address.manage')" to="/addresses" class="account-menu-item"><span class="account-menu-icon"><MapPin :size="17" aria-hidden="true" /></span><span>收货地址</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
+      <router-link v-if="store.has('transfer.password')" to="/security/transfer-password" class="account-menu-item"><span class="account-menu-icon"><KeyRound :size="17" aria-hidden="true" /></span><span>转账支付密码</span><span class="account-menu-status">{{ store.profile?.transferPasswordSet ? '已设置' : '未设置' }}</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
+      <button v-if="store.has('realname')" type="button" class="account-menu-item" :disabled="store.profile?.realNameStatus === 1" @click="showRealname = true">
         <span class="account-menu-icon"><ShieldCheck :size="17" aria-hidden="true" /></span><span>实名认证</span>
         <span class="account-menu-status">{{ store.profile?.realNameStatus === 1 ? '已完成' : '立即认证' }}</span><ChevronRight :size="16" aria-hidden="true" />
       </button>
@@ -94,7 +99,7 @@ function logout() {
 
     <t-button theme="danger" variant="outline" block class="logout-button" @click="logout">退出登录</t-button>
 
-    <AppModal v-model="showRealname" eyebrow="身份核验" title="实名认证"
+    <AppModal v-if="store.has('realname')" v-model="showRealname" eyebrow="身份核验" title="实名认证"
       description="完成实名后可进行转账、购买与提现等操作。" confirm-text="提交认证"
       hint="身份信息仅用于核验，平台将严格保密。" @confirm="submitRealname">
       <label class="app-field"><span>真实姓名</span><input v-model="realName" class="input" autocomplete="name" placeholder="请输入真实姓名" /></label>
@@ -153,6 +158,7 @@ function logout() {
 .partner-entry-title { color: var(--text); font-size: 13px; font-weight: 700; }
 .partner-entry-description { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .profile-assets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 11px; }
+.profile-assets--single { grid-template-columns: 1fr; }
 .profile-asset-card { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 13px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text); text-align: left; box-shadow: var(--shadow-card); cursor: pointer; }
 .profile-asset-icon { display: flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 11px; background: var(--brand-soft); color: var(--brand); }
 .profile-asset-card--equity .profile-asset-icon { background: var(--green-soft); color: var(--green); }

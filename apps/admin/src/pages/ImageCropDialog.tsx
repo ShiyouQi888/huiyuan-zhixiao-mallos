@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, Image as ImageIcon, Move, RotateCcw, X, ZoomIn } from 'lucide-react';
+import { Button } from '../components/ui';
 
 export type ProductImagePreset = 'product-cover' | 'product-detail';
 
@@ -172,32 +174,42 @@ export function ImageCropDialog({ file, preset, progress, busy = false, onCancel
     ? '800 × 800 px'
     : `${Math.min(definition.width, Math.max(1, Math.round(crop.width)))} × ${Math.max(1, Math.round(Math.min(definition.width, Math.max(1, Math.round(crop.width))) * crop.height / Math.max(1, crop.width)))} px`;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="image-crop-title">
-      <div className="flex max-h-[min(92vh,900px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-surface-900 shadow-2xl">
-        <header className="flex items-start justify-between gap-4 border-b border-white/[0.06] px-6 py-5">
+  return createPortal(
+    <div className="modal-backdrop z-[100]" role="dialog" aria-modal="true" aria-labelledby="image-crop-title">
+      <div className="flex max-h-[min(92vh,900px)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-pop">
+        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-medium text-indigo-300"><ImageIcon size={15} /> 商品图片处理</div>
-            <h2 id="image-crop-title" className="mt-1 text-lg font-semibold text-white">{definition.label}裁剪</h2>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">{definition.description}</p>
+            <div className="flex items-center gap-1.5 text-2xs font-medium text-accent-ink">
+              <ImageIcon size={14} /> 商品图片处理
+            </div>
+            <h2 id="image-crop-title" className="mt-1 text-base font-semibold text-ink">{definition.label}裁剪</h2>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-ink-muted">{definition.description}</p>
           </div>
-          <button type="button" aria-label="关闭裁剪" disabled={busy} onClick={onCancel} className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-40"><X size={18} /></button>
+          <button
+            type="button"
+            aria-label="关闭裁剪"
+            disabled={busy}
+            onClick={onCancel}
+            className="modal-close"
+          >
+            <X size={17} />
+          </button>
         </header>
 
-        <div className="grid min-h-0 gap-6 overflow-y-auto p-6 lg:grid-cols-[minmax(0,1fr)_250px]">
-          <section ref={stageRef} className="flex min-h-[320px] flex-col items-center justify-center rounded-xl border border-white/[0.06] bg-surface-950 p-4">
+        <div className="grid min-h-0 gap-5 overflow-y-auto p-5 lg:grid-cols-[minmax(0,1fr)_240px]">
+          <section ref={stageRef} className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-line bg-canvas p-4">
             {objectUrl && <img ref={imageRef} src={objectUrl} alt="待裁剪图片" onLoad={onImageLoad} className="hidden" />}
             {preview.width > 0 ? (
-                <div className="relative shrink-0 overflow-hidden bg-black/30" style={{ width: preview.width, height: preview.height }}>
+              <div className="relative shrink-0 overflow-hidden bg-black/40" style={{ width: preview.width, height: preview.height }}>
                 <img src={objectUrl} alt="待裁剪图片预览" draggable={false} className="block h-full w-full select-none object-fill" />
                 <div
-                  className="absolute touch-none cursor-move border-2 border-white shadow-[0_0_0_999px_rgba(2,6,23,0.62)]"
+                  className="absolute touch-none cursor-move border-2 border-white shadow-[0_0_0_999px_rgba(2,6,23,0.6)]"
                   style={{
                     left: crop.x * preview.scale,
                     top: crop.y * preview.scale,
                     width: crop.width * preview.scale,
                     height: crop.height * preview.scale,
-                    outline: '1px solid rgba(79,70,229,.9)',
+                    outline: '1px solid rgb(var(--accent-rgb) / .9)',
                   }}
                   onPointerDown={(event) => {
                     event.currentTarget.setPointerCapture(event.pointerId);
@@ -207,43 +219,84 @@ export function ImageCropDialog({ file, preset, progress, busy = false, onCancel
                   onPointerUp={(event) => { if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null; }}
                   onPointerCancel={() => { dragRef.current = null; }}
                 >
-                  <span className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+                  <span className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
                     {Array.from({ length: 9 }, (_, index) => <i key={index} className="border border-white/25" />)}
                   </span>
-                  <span className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md bg-black/65 px-2 py-1 text-[10px] text-white"><Move size={11} /> 拖动调整构图</span>
+                  <span className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded bg-black/65 px-2 py-1 text-2xs text-white">
+                    <Move size={11} /> 拖动调整构图
+                  </span>
                 </div>
               </div>
             ) : (
-              <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-slate-500"><ImageIcon size={28} />正在读取图片…</div>
+              <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-ink-faint">
+                <ImageIcon size={26} /> 正在读取图片…
+              </div>
             )}
           </section>
 
-          <aside className="space-y-5">
-            <div className="rounded-xl border border-white/[0.06] bg-surface-850 p-4">
-              <div className="text-xs font-semibold text-slate-300">输出规格</div>
-              <div className="mt-3 flex items-center justify-between gap-3 text-xs"><span className="text-slate-500">裁剪尺寸</span><strong className="font-medium text-white">{outputSize}</strong></div>
-              <div className="mt-2 flex items-center justify-between gap-3 text-xs"><span className="text-slate-500">源文件</span><span className="max-w-36 truncate text-slate-300" title={file.name}>{file.name}</span></div>
-              <div className="mt-2 flex items-center justify-between gap-3 text-xs"><span className="text-slate-500">原始分辨率</span><span className="text-slate-300">{natural.width ? `${natural.width} × ${natural.height} px` : '读取中'}</span></div>
+          <aside className="space-y-4">
+            <div className="subtle-panel p-3.5">
+              <div className="text-xs font-medium text-ink-2">输出规格</div>
+              <div className="mt-2.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink-faint">裁剪尺寸</span>
+                  <strong className="num font-medium text-ink">{outputSize}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink-faint">源文件</span>
+                  <span className="max-w-32 truncate text-ink-2" title={file.name}>{file.name}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink-faint">原始分辨率</span>
+                  <span className="num text-ink-2">{natural.width ? `${natural.width} × ${natural.height}` : '读取中'}</span>
+                </div>
+              </div>
             </div>
 
-            <div className="rounded-xl border border-white/[0.06] bg-surface-850 p-4">
-              <label htmlFor="crop-zoom" className="flex items-center justify-between text-xs font-semibold text-slate-300"><span className="flex items-center gap-2"><ZoomIn size={14} /> 裁剪范围</span><span className="font-normal text-slate-500">{zoom}%</span></label>
-              <input id="crop-zoom" type="range" min="45" max="100" step="1" value={zoom} onChange={(event) => updateZoom(Number(event.target.value))} className="mt-4 w-full accent-indigo-500" />
-              <div className="mt-2 flex justify-between text-[10px] text-slate-500"><span>裁剪更多</span><span>保留更多画面</span></div>
-              <p className="mt-4 text-[11px] leading-5 text-slate-500">拖动选框调整图片主体位置。详情图默认保留原图比例，适配 H5 全宽展示。</p>
-              <button type="button" onClick={() => updateZoom(100)} className="mt-3 inline-flex items-center gap-1.5 text-xs text-indigo-300 transition hover:text-indigo-200"><RotateCcw size={13} />恢复完整构图</button>
+            <div className="subtle-panel p-3.5">
+              <label htmlFor="crop-zoom" className="flex items-center justify-between text-xs font-medium text-ink-2">
+                <span className="flex items-center gap-1.5"><ZoomIn size={13} /> 裁剪范围</span>
+                <span className="num text-ink-muted">{zoom}%</span>
+              </label>
+              <input
+                id="crop-zoom"
+                type="range"
+                min="45"
+                max="100"
+                step="1"
+                value={zoom}
+                onChange={(event) => updateZoom(Number(event.target.value))}
+                className="mt-3 w-full accent-[var(--accent)]"
+              />
+              <div className="mt-1 flex justify-between text-2xs text-ink-faint">
+                <span>裁剪更多</span>
+                <span>保留更多画面</span>
+              </div>
+              <p className="mt-3 text-2xs leading-5 text-ink-faint">拖动选框调整图片主体位置。详情图默认保留原图比例，适配 H5 全宽展示。</p>
+              <button
+                type="button"
+                onClick={() => updateZoom(100)}
+                className="mt-2 inline-flex items-center gap-1.5 text-2xs text-accent-ink transition hover:opacity-80"
+              >
+                <RotateCcw size={12} /> 恢复完整构图
+              </button>
             </div>
           </aside>
         </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] px-6 py-4">
-          <span className={`text-xs ${error ? 'text-rose-400' : 'text-slate-500'}`}>{error || progress || '裁剪完成后会自动上传并写入文件库'}</span>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+          <span className={error ? 'text-xs text-danger' : 'text-xs text-ink-faint'}>
+            {error || progress || '裁剪完成后会自动上传并写入文件库'}
+          </span>
           <div className="flex items-center gap-2">
-            <button type="button" disabled={busy} onClick={onCancel} className="btn-ghost">跳过此图</button>
-            <button type="button" disabled={busy || !natural.width} onClick={finishCrop} className="btn-primary"><Check size={15} />{busy ? '处理中…' : '裁剪并入库'}</button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>跳过此图</Button>
+            <Button variant="primary" size="sm" disabled={busy || !natural.width} onClick={finishCrop}>
+              <Check size={14} /> {busy ? '处理中…' : '裁剪并入库'}
+            </Button>
           </div>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

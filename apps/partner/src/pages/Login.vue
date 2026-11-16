@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api';
+import { useFeaturesStore } from '../stores/features';
 import { Crown } from 'lucide-vue-next';
 
 const phone = ref('13900000001');
@@ -9,6 +10,7 @@ const password = ref('123456');
 const error = ref('');
 const loading = ref(false);
 const router = useRouter();
+const features = useFeaturesStore();
 
 async function submit() {
   loading.value = true;
@@ -18,6 +20,7 @@ async function submit() {
       method: 'POST', body: { phone: phone.value.trim(), password: password.value.trim() },
     });
     localStorage.setItem('solar_member_token', data.token);
+    features.reset();
     sessionStorage.removeItem('solar_partner_checked');
     router.replace('/');
   } catch (e: any) {

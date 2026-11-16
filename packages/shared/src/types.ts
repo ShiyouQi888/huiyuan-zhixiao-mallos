@@ -28,7 +28,7 @@ export interface FeatureFlagDTO {
 }
 
 /** 平台标识 */
-export type Platform = 'h5' | 'weixin' | 'alipay' | 'app';
+export type Platform = 'h5' | 'app';
 
 /** 用户角色 */
 export type UserRole = 'SUPER_ADMIN' | 'OPERATOR' | 'FINANCE' | 'SUPPORT' | 'MEMBER';

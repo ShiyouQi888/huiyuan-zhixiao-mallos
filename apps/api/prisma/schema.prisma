@@ -23,6 +23,7 @@ model User {
   nickname             String?   @db.VarChar(64)
   avatar               String?   @db.VarChar(512)
   passwordHash         String?   @db.VarChar(255)
+  transferPasswordHash String?   @db.VarChar(255)
   inviteCode           String    @unique @db.VarChar(32)
 
   packageId            Int?
@@ -246,6 +247,8 @@ model Order {
   equityDeduct     BigInt    @default(0)
   balanceDeduct    BigInt    @default(0)
   cashPay          BigInt    @default(0)
+  /// 下单时的收货地址快照，地址簿变更不影响历史订单
+  shippingAddress  Json?
   /// 0 CREATED 1 PAID 2 DELIVERED 3 COMPLETED
   status           Int       @default(0) @db.SmallInt
   /// 下单时推荐人快照

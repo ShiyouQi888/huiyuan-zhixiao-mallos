@@ -26,6 +26,7 @@ export default {
           ink: 'var(--accent-ink)',
           soft: 'var(--accent-soft)',
           'soft-strong': 'var(--accent-soft-strong)',
+          on: 'var(--on-accent)',
         },
         success: {
           DEFAULT: 'var(--success)',

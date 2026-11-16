@@ -411,7 +411,7 @@ docker compose -p solar up -d postgres redis
 - 订单超时自动关闭 / 自动确认收货
 - 敏感字段加密存储（AES）
 - 幂等键由前端统一注入
-- uni-app 多端编译（小程序 / App）
+- APP 原生端方案与桥接能力（规划中；当前渠道为 H5）
 - 结算引擎性能压测与大数据量验证
 
 ---

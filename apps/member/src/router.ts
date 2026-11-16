@@ -16,11 +16,13 @@ const routes = [
   { path: '/mine', component: () => import('./pages/Mine.vue'), meta: { tab: true } },
 
   // 子页面
-  { path: '/products', component: () => import('./pages/Products.vue') },
-  { path: '/product/:id', component: () => import('./pages/ProductDetail.vue'), meta: { immersive: true } },
+  { path: '/products', component: () => import('./pages/Products.vue'), meta: { flag: 'product.mall' } },
+  { path: '/product/:id', component: () => import('./pages/ProductDetail.vue'), meta: { immersive: true, flag: 'product.mall' } },
   { path: '/orders', component: () => import('./pages/Orders.vue') },
-  { path: '/assets', component: () => import('./pages/Assets.vue') },
-  { path: '/packages', component: () => import('./pages/Packages.vue') },
+  { path: '/assets', component: () => import('./pages/Assets.vue'), meta: { flagsAny: ['wallet.account', 'equity.account', 'token.view'] } },
+  { path: '/packages', component: () => import('./pages/Packages.vue'), meta: { flag: 'package.purchase' } },
+  { path: '/addresses', component: () => import('./pages/Addresses.vue'), meta: { flag: 'address.manage' } },
+  { path: '/security/transfer-password', component: () => import('./pages/TransferPassword.vue'), meta: { flag: 'transfer.password' } },
 
   // 兼容旧链接：跳转到新结构
   { path: '/bonus', redirect: '/income' },
@@ -34,15 +36,18 @@ export const router = createRouter({
   routes,
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('solar_member_token');
   if (!token && to.path !== '/login') return '/login';
   if (token && to.path === '/login') return '/';
 
   // 功能开关：被关闭的 Tab/页面直接拦截，防止手动输入 hash 绕过
+  if (!token || to.path === '/login') return true;
+  const store = useUserStore();
+  await store.loadFeatures();
+  const fallback = store.has('product.mall') ? '/' : '/mine';
   const flag = to.meta.flag as string | undefined;
-  if (flag) {
-    const store = useUserStore();
-    if (!store.has(flag)) return '/';
-  }
+  if (flag && !store.has(flag)) return fallback;
+  const flagsAny = to.meta.flagsAny as string[] | undefined;
+  if (flagsAny && !flagsAny.some((feature) => store.has(feature))) return '/mine';
 });

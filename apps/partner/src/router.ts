@@ -1,13 +1,14 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
+import { useFeaturesStore } from './stores/features';
 
 const routes = [
   { path: '/login', component: () => import('./pages/Login.vue') },
   { path: '/auth', component: () => import('./pages/Auth.vue') },
   { path: '/', component: () => import('./pages/Overview.vue'), meta: { tab: true } },
-  { path: '/team', component: () => import('./pages/Team.vue'), meta: { tab: true } },
-  { path: '/income', component: () => import('./pages/Income.vue'), meta: { tab: true } },
-  { path: '/level', component: () => import('./pages/Level.vue'), meta: { tab: true } },
-  { path: '/dividend', component: () => import('./pages/Dividend.vue') },
+  { path: '/team', component: () => import('./pages/Team.vue'), meta: { tab: true, flag: 'team.view' } },
+  { path: '/income', component: () => import('./pages/Income.vue'), meta: { tab: true, flag: 'bonus.detail' } },
+  { path: '/level', component: () => import('./pages/Level.vue'), meta: { tab: true, flag: 'rank.view' } },
+  { path: '/dividend', component: () => import('./pages/Dividend.vue'), meta: { flag: 'rank.dividend' } },
 ];
 
 export const router = createRouter({
@@ -24,21 +25,27 @@ router.beforeEach(async (to) => {
   }
   if (to.path === '/login' || to.path === '/auth') return true;
 
-  // 权限校验缓存在 sessionStorage，避免每次路由跳转都请求
-  const checked = sessionStorage.getItem('solar_partner_checked');
-  if (checked === 'true') return true;
-  try {
-    const res = await fetch(`${(import.meta.env.VITE_API_BASE_URL as string) ?? 'http://localhost:3000/api'}/access/partner/check`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const json = await res.json();
-    if (json.code !== 0) {
-      sessionStorage.removeItem('solar_partner_checked');
+  // 权限校验缓存在 sessionStorage，功能开关由服务端实时下发。
+  const checked = sessionStorage.getItem('solar_partner_checked') === 'true';
+  if (!checked) {
+    try {
+      const res = await fetch(`${(import.meta.env.VITE_API_BASE_URL as string) ?? 'http://localhost:3000/api'}/access/partner/check`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.code !== 0) {
+        sessionStorage.removeItem('solar_partner_checked');
+        return '/login';
+      }
+      sessionStorage.setItem('solar_partner_checked', 'true');
+    } catch {
       return '/login';
     }
-    sessionStorage.setItem('solar_partner_checked', 'true');
-    return true;
-  } catch {
-    return '/login';
   }
+
+  const features = useFeaturesStore();
+  await features.load();
+  const flag = to.meta.flag as string | undefined;
+  if (flag && !features.has(flag)) return '/';
+  return true;
 });

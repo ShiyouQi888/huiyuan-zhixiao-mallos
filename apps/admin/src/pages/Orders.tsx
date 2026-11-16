@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Package, RefreshCw, Truck } from 'lucide-react';
+import { CheckCircle2, MapPin, Package, RefreshCw, Truck } from 'lucide-react';
 import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
 import {
   Badge, Button, Card, Empty, ErrorBlock, FilterBar, KeyValue, LoadingBlock, Modal, PageHeader,
@@ -25,6 +25,7 @@ interface Order {
   deliveredAt?: string | null;
   finishedAt?: string | null;
   remark?: string | null;
+  shippingAddress?: { receiver: string; phone: string; province: string; city: string; district: string; detail: string } | null;
   user?: { nickname?: string | null; phone?: string | null };
   items?: Array<{ id: string | number; name: string; price: number; quantity: number; amount: number }>;
 }
@@ -267,6 +268,19 @@ export function Orders() {
               <KeyValue label="交付时间" value={fmtDate(detail.deliveredAt)} />
               <KeyValue label="完成时间" value={fmtDate(detail.finishedAt)} />
             </div>
+
+            {detail.shippingAddress && (
+              <section className="notice">
+                <MapPin size={15} className="mt-0.5 shrink-0 text-accent-ink" />
+                <div className="min-w-0">
+                  <div className="mb-1 text-xs font-medium text-ink-soft">收货信息</div>
+                  <div className="text-sm font-medium text-ink">{detail.shippingAddress.receiver} · {detail.shippingAddress.phone}</div>
+                  <div className="mt-1 break-words text-xs text-ink-muted">
+                    {detail.shippingAddress.province}{detail.shippingAddress.city}{detail.shippingAddress.district}{detail.shippingAddress.detail}
+                  </div>
+                </div>
+              </section>
+            )}
 
             <div>
               <div className="mb-2 text-xs font-medium text-ink-soft">支付构成</div>

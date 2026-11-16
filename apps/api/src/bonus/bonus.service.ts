@@ -94,24 +94,28 @@ export class BonusService {
   }
 
   /** 收益汇总 */
-  async summary(userId: bigint) {
+  async summary(userId: bigint, includeDividend = true) {
+    const where = { userId, ...(includeDividend ? {} : { type: { not: 5 } }) };
     const [aggregate, grouped, recent] = await Promise.all([
-      this.prisma.bonusRecord.aggregate({ where: { userId }, _sum: { amount: true } }),
-      this.prisma.bonusRecord.groupBy({ by: ['type'], where: { userId }, _sum: { amount: true } }),
-      this.prisma.bonusRecord.findMany({ where: { userId }, orderBy: [{ settleDate: 'desc' }, { id: 'desc' }], take: 20 }),
+      this.prisma.bonusRecord.aggregate({ where, _sum: { amount: true } }),
+      this.prisma.bonusRecord.groupBy({ by: ['type'], where, _sum: { amount: true } }),
+      this.prisma.bonusRecord.findMany({ where, orderBy: [{ settleDate: 'desc' }, { id: 'desc' }], take: 20 }),
     ]);
     const totalsByType = new Map(grouped.map((item) => [item.type, item._sum.amount ?? 0n]));
     const byType = [1, 2, 3, 4, 5, 6].map((type) => ({ type, amount: totalsByType.get(type) ?? 0n }));
     return { total: aggregate._sum.amount ?? 0n, byType, recent };
   }
 
-  async records(userId: bigint, page = 1, pageSize = 20, type?: number) {
+  async records(userId: bigint, page = 1, pageSize = 20, type?: number, includeDividend = true) {
     if (type !== undefined && (!Number.isInteger(type) || type < 1 || type > 6)) {
       throw Err.param('收益类型不合法');
     }
     const currentPage = Math.max(1, Number(page) || 1);
     const safePageSize = Math.min(50, Math.max(1, Number(pageSize) || 20));
-    const where = { userId, ...(type !== undefined ? { type } : {}) };
+    const where = {
+      userId,
+      ...(type !== undefined ? { type } : includeDividend ? {} : { type: { not: 5 } }),
+    };
     const [list, total] = await Promise.all([
       this.prisma.bonusRecord.findMany({
         where,
