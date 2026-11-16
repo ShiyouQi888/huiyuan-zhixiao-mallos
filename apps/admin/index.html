@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN" theme-mode="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>太阳线会员系统 · 管理后台</title>
+    <script>
+      (() => {
+        const mode = localStorage.getItem('solar_theme_mode') === 'dark' ? 'dark' : 'light';
+        document.documentElement.setAttribute('theme-mode', mode);
+        document.documentElement.classList.toggle('dark', mode === 'dark');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

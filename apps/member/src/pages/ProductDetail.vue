@@ -1,0 +1,158 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { api, money, post, resolveAssetUrl } from '../api';
+import { Toast } from './_toast';
+import EmptyState from '../components/EmptyState.vue';
+import AppModal from '../components/AppModal.vue';
+import { BadgeCheck, ChevronLeft, CircleDollarSign, Minus, Package, Plus, Tags, Wallet } from 'lucide-vue-next';
+
+const route = useRoute();
+const router = useRouter();
+const product = ref<any>(null);
+const selectedImageIndex = ref(0);
+const quantity = ref(1);
+const loading = ref(true);
+const buying = ref(false);
+const equityModal = ref(false);
+
+const images = computed(() => (product.value?.images ?? []).filter(Boolean));
+const selectedImage = computed(() => images.value[selectedImageIndex.value] ?? '');
+const unitPrice = computed(() => Number(product.value?.effectivePrice ?? product.value?.price ?? 0));
+const totalPrice = computed(() => unitPrice.value * quantity.value);
+const stock = computed(() => Math.max(0, Number(product.value?.stock ?? 0)));
+const canBuy = computed(() => stock.value > 0 && quantity.value <= stock.value && !buying.value);
+const hasMemberPrice = computed(() => Boolean(product.value) && unitPrice.value < Number(product.value?.price ?? 0));
+
+onMounted(async () => {
+  loading.value = true;
+  const [detail, visibleProducts] = await Promise.all([
+    api<any>(`/products/${route.params.id}`).catch(() => null),
+    api<any[]>('/products').catch(() => []),
+  ]);
+  const visibleProduct = visibleProducts.find((item) => String(item.id) === String(route.params.id));
+  product.value = detail && visibleProduct
+    ? { ...detail, effectivePrice: visibleProduct.effectivePrice ?? detail.price }
+    : null;
+  loading.value = false;
+});
+
+async function buy() {
+  if (!product.value || !canBuy.value) return;
+  buying.value = true;
+  try {
+    await post('/orders', {
+      type: 4,
+      productId: Number(product.value.id),
+      quantity: quantity.value,
+      useEquity: true,
+      useBalance: true,
+    });
+    Toast('下单成功', 'success');
+    router.push('/orders');
+  } catch (e: any) {
+    const message = e.message ?? '下单失败，请稍后重试';
+    if (/权益值.*不足/.test(message)) {
+      equityModal.value = true;
+    } else {
+      Toast(message, 'danger');
+    }
+  } finally {
+    buying.value = false;
+  }
+}
+</script>
+
+<template>
+  <main class="page product-detail-page">
+    <button type="button" class="detail-back" aria-label="返回上一页" @click="router.back()">
+      <ChevronLeft :size="19" aria-hidden="true" />
+    </button>
+
+    <div v-if="loading" class="skeleton-card detail-loading">
+      <div class="skeleton-block skeleton-media" />
+      <div class="skeleton-lines"><span class="skeleton-block" /><span class="skeleton-block" /></div>
+    </div>
+    <div v-else-if="!product" class="detail-empty">
+      <EmptyState title="商品暂不可用" description="商品可能已下架或当前会员档不可购买" action-label="返回商城" @action="router.push('/products')" />
+    </div>
+    <template v-else>
+      <section class="detail-hero">
+        <img v-if="selectedImage" :src="resolveAssetUrl(selectedImage)" :alt="product.name" />
+        <span v-else class="product-card-placeholder"><Package :size="52" stroke-width="1.3" aria-hidden="true" /></span>
+        <div v-if="images.length > 1" class="detail-dots" aria-label="商品图片切换">
+          <button v-for="(image, index) in images" :key="image" type="button" class="detail-dot"
+            :class="{ active: selectedImageIndex === index }" :aria-label="`查看第 ${index + 1} 张图片`"
+            @click="selectedImageIndex = index" />
+        </div>
+      </section>
+
+      <div class="detail-sheet">
+        <div class="detail-price-block">
+          <div class="detail-price-line">
+            <span class="detail-price"><small>¥</small>{{ money(unitPrice) }}</span>
+            <span v-if="Number(product.originalPrice) > unitPrice" class="detail-original-price">¥{{ money(product.originalPrice) }}</span>
+            <span v-if="hasMemberPrice" class="detail-member-tag">会员专享</span>
+          </div>
+        </div>
+
+        <h1 class="detail-title">{{ product.name }}</h1>
+        <p v-if="product.subtitle" class="detail-subtitle">{{ product.subtitle }}</p>
+
+        <div class="detail-tags">
+          <span v-if="hasMemberPrice" class="detail-tag"><BadgeCheck :size="12" aria-hidden="true" />会员专享价</span>
+          <span v-if="product.category?.name" class="detail-tag"><Tags :size="12" aria-hidden="true" />{{ product.category.name }}</span>
+          <span class="detail-tag"><Package :size="12" aria-hidden="true" />库存 {{ stock }}</span>
+        </div>
+
+        <div v-if="images.length > 1" class="detail-thumbnails" aria-label="商品图片">
+          <button v-for="(image, index) in images" :key="image" type="button" class="detail-thumbnail"
+            :class="{ active: selectedImageIndex === index }" :aria-label="`查看第 ${index + 1} 张图片`"
+            @click="selectedImageIndex = index">
+            <img :src="resolveAssetUrl(image)" alt="" />
+          </button>
+        </div>
+      </div>
+
+      <section class="detail-card">
+        <div class="detail-card-head"><h2>商品信息</h2></div>
+        <div class="detail-facts">
+          <div><strong>{{ stock }}</strong><span>当前库存</span></div>
+          <div><strong>{{ product.category?.name ?? '精选商品' }}</strong><span>所属分类</span></div>
+        </div>
+        <div class="detail-service">
+          <span><CircleDollarSign :size="13" aria-hidden="true" />支持权益值抵扣</span>
+          <span><Wallet :size="13" aria-hidden="true" />支持余额支付</span>
+          <span v-if="hasMemberPrice"><BadgeCheck :size="13" aria-hidden="true" />会员专属价格</span>
+        </div>
+      </section>
+
+      <section class="detail-card detail-description">
+        <div class="detail-card-head"><h2>商品介绍</h2></div>
+        <p>{{ product.description || '暂无详细介绍，请以商品实际信息为准。' }}</p>
+        <div v-for="(image, index) in product.details ?? []" :key="`${image}-${index}`" class="detail-description-image">
+          <img :src="resolveAssetUrl(image)" :alt="`${product.name}详情图 ${index + 1}`" loading="lazy" />
+        </div>
+      </section>
+
+      <div class="detail-purchase-bar">
+        <div class="quantity-control" aria-label="购买数量">
+          <button type="button" aria-label="减少数量" :disabled="quantity <= 1" @click="quantity = Math.max(1, quantity - 1)"><Minus :size="14" /></button>
+          <span>{{ quantity }}</span>
+          <button type="button" aria-label="增加数量" :disabled="quantity >= stock" @click="quantity = Math.min(stock, quantity + 1)"><Plus :size="14" /></button>
+        </div>
+        <div class="purchase-total"><small>合计</small><strong>¥{{ money(totalPrice) }}</strong></div>
+        <button type="button" class="btn btn-primary purchase-button" :disabled="!canBuy" @click="buy">
+          {{ buying ? '提交中…' : stock ? '立即购买' : '暂时缺货' }}
+        </button>
+      </div>
+    </template>
+
+    <AppModal v-model="equityModal" eyebrow="下单提示" title="权益值余额不足" alert
+      description="本单需使用权益值抵扣，当前账户可用权益值不足。"
+      hint="确认后将前往资产中心。" confirm-text="确认"
+      @confirm="equityModal = false; router.push('/assets')">
+      <div class="app-modal-note">可前往资产中心查看权益值明细，或购买会员礼包补充权益值后再下单。</div>
+    </AppModal>
+  </main>
+</template>

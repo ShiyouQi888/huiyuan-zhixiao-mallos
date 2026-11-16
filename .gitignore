@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+coverage/
+.docusaurus/
+.turbo/
+.DS_Store
+Thumbs.db
+apps/api/prisma/*.db
+
+# 本地工作记录与调试过程产物，不入库
+.workbuddy/
+.playwright-cli/
+2026-11-16/
