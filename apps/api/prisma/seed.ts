@@ -40,6 +40,8 @@ const CONFIGS: Array<{ key: string; value: unknown; group: string; description: 
   { key: 'transfer.enabled', value: true, group: 'transfer', description: '转账总开关' },
   { key: 'transfer.limit', value: 0, group: 'transfer', description: '单笔转账限额，0=不限' },
   { key: 'transfer.accept_timeout_hours', value: 24, group: 'transfer', description: '转账确认超时（小时）' },
+  { key: 'token.transfer_enabled', value: true, group: 'token', description: '数权转账开关（即时到账）' },
+  { key: 'token.transfer_limit', value: 0, group: 'token', description: '数权单笔转账限额，0=不限' },
   { key: 'order.auto_finish_days', value: 10, group: 'order', description: '自动确认收货天数' },
   { key: 'order.pay_timeout_minutes', value: 30, group: 'order', description: '支付超时（分钟）' },
   { key: 'access.partner_min_level', value: 1, group: 'access', description: '合伙人端准入最低等级（含）' },
@@ -58,6 +60,7 @@ const FEATURE_FLAGS = [
   ['wallet.account', '钱包余额', 'wallet'],
   ['wallet.transfer', '余额转账', 'wallet'],
   ['token.view', '数权查看', 'token'],
+  ['token.transfer', '数权转账', 'token'],
   ['rank.view', '等级信息', 'rank'],
   ['rank.dividend', '分红池明细', 'rank'],
   ['notify.subscribe', '消息订阅', 'notify'],
@@ -90,7 +93,7 @@ async function main() {
   }
   console.log(`  packages: ${PACKAGES.length}`);
 
-  // 配置（13）
+  // 配置（18）
   for (const c of CONFIGS) {
     await prisma.config.upsert({
       where: { key: c.key },
@@ -100,7 +103,7 @@ async function main() {
   }
   console.log(`  configs: ${CONFIGS.length}`);
 
-  // 功能开关（19）
+  // 功能开关（20）
   for (const [code, name, module] of FEATURE_FLAGS) {
     await prisma.featureFlag.upsert({
       where: { code },

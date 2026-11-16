@@ -447,12 +447,23 @@ export class AdminExtendedController {
   @Get('tokens')
   @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE')
   tokens(@Query('page') page = '1') {
-    return this.prisma.tokenLot.groupBy({
-      by: ['userId'],
-      _sum: { amount: true },
-      orderBy: { _sum: { amount: 'desc' } },
-      skip: (Number(page) - 1) * 20, take: 20,
-    });
+    return this.prisma.tokenAccount
+      .findMany({
+        orderBy: { balance: 'desc' },
+        skip: (Number(page) - 1) * 20,
+        take: 20,
+        include: { user: { select: { id: true, phone: true, nickname: true } } },
+      })
+      .then((rows) =>
+        rows.map((r) => ({
+          userId: r.userId,
+          balance: r.balance,
+          totalGranted: r.totalGranted,
+          totalTransferIn: r.totalTransferIn,
+          totalTransferOut: r.totalTransferOut,
+          user: r.user,
+        })),
+      );
   }
 
   /* ============ 风控 ============ */

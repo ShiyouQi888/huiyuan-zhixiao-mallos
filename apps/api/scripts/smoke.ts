@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   const adminMe = await api<any>('/api/me', { token: admin.token });
   const features = await api<{ features: any[] }>('/api/features?platform=h5', { token: admin.token });
-  check('功能开关下发 19 项', features.features.length === 19, features.features.length);
+  check('功能开关下发 20 项', features.features.length === 20, features.features.length);
 
   // 2. 注册两级用户
   console.log('\n[2] 注册与关系绑定');
@@ -106,7 +106,9 @@ async function main(): Promise<void> {
   console.log('\n[4] 每日结算');
   const today = new Date();
   const perfDate = today.toISOString().slice(0, 10);
-  const releaseDate = new Date(today.getTime() + 86400_000).toISOString().slice(0, 10);
+  // 直推奖第 1 期 dueAt 为订单完成日的次日 UTC 16:00，
+  // 需再往后一天结算才能覆盖该分期的到期条件（与 e2e-full 保持一致）
+  const releaseDate = new Date(today.getTime() + 2 * 86400_000).toISOString().slice(0, 10);
 
   // 超管走审批流会单人直通，返回 { direct: true, result: {...} }
   const settleResult = (r: any) => (r.result ?? r);

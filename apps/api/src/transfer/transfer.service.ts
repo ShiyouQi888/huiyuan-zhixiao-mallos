@@ -4,16 +4,18 @@ import { ConfigService } from '../config/config.service';
 import { EquityService } from '../equity/equity.service';
 import { FeaturesService } from '../features/features.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TokenService } from '../token/token.service';
 import { WalletService } from '../wallet/wallet.service';
 import { UserService } from '../user/user.service';
 
-/** 会员间转账：钱包余额 / 权益值，均需接收方 24h 内确认 */
+/** 会员间转账：钱包余额 / 权益值（需接收方 24h 内确认）、数权（即时到账） */
 @Injectable()
 export class TransferService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly wallet: WalletService,
     private readonly equity: EquityService,
+    private readonly token: TokenService,
     private readonly features: FeaturesService,
     private readonly config: ConfigService,
     private readonly users: UserService,
@@ -34,7 +36,7 @@ export class TransferService {
     from: { id: bigint; deviceFingerprint: string | null; createdAt: Date },
     to: { id: bigint; deviceFingerprint: string | null },
     amount: bigint,
-    scene: 'wallet' | 'equity',
+    scene: 'wallet' | 'equity' | 'token',
   ): Promise<number> {
     if (from.deviceFingerprint && from.deviceFingerprint === to.deviceFingerprint) {
       await this.prisma.riskEvent.create({
@@ -46,17 +48,27 @@ export class TransferService {
     let score = 0;
     const weekAgo = new Date(Date.now() - 7 * 86400_000);
     const dayAgo = new Date(Date.now() - 86400_000);
-    const countWhere = scene === 'wallet'
-      ? { fromUserId: from.id, toUserId: to.id, createdAt: { gte: weekAgo } }
-      : { fromUserId: from.id, toUserId: to.id, createdAt: { gte: weekAgo } };
-    const pairCount = scene === 'wallet'
-      ? await this.prisma.walletTransfer.count({ where: countWhere })
-      : await this.prisma.equityTransfer.count({ where: countWhere });
+    const pairWhere = { fromUserId: from.id, toUserId: to.id, createdAt: { gte: weekAgo } };
+    const inWhere = { toUserId: to.id, createdAt: { gte: dayAgo } };
+    let pairCount = 0;
+    let inCount = 0;
+    if (scene === 'wallet') {
+      [pairCount, inCount] = await Promise.all([
+        this.prisma.walletTransfer.count({ where: pairWhere }),
+        this.prisma.walletTransfer.count({ where: inWhere }),
+      ]);
+    } else if (scene === 'equity') {
+      [pairCount, inCount] = await Promise.all([
+        this.prisma.equityTransfer.count({ where: pairWhere }),
+        this.prisma.equityTransfer.count({ where: inWhere }),
+      ]);
+    } else {
+      [pairCount, inCount] = await Promise.all([
+        this.prisma.tokenTransfer.count({ where: pairWhere }),
+        this.prisma.tokenTransfer.count({ where: inWhere }),
+      ]);
+    }
     if (pairCount >= 3) score += 40;
-
-    const inCount = scene === 'wallet'
-      ? await this.prisma.walletTransfer.count({ where: { toUserId: to.id, createdAt: { gte: dayAgo } } })
-      : await this.prisma.equityTransfer.count({ where: { toUserId: to.id, createdAt: { gte: dayAgo } } });
     if (inCount >= 3) score += 30;
 
     const ageDays = (Date.now() - from.createdAt.getTime()) / 86400_000;
@@ -70,8 +82,14 @@ export class TransferService {
     return score > 0 ? 1 : 0;
   }
 
-  private async checkAmount(amount: bigint): Promise<void> {
+  private async checkAmount(amount: bigint, scene: 'wallet' | 'equity' | 'token' = 'wallet'): Promise<void> {
     if (amount <= 0n) throw Err.param('转账金额必须大于 0');
+    if (scene === 'token') {
+      const limit = BigInt(await this.config.getNumber('token.transfer_limit', 0));
+      if (limit > 0n && amount > limit) throw Err.param(`单笔转账不得超过 ${limit}`);
+      if (!(await this.config.get<boolean>('token.transfer_enabled', true))) throw Err.featureDisabled('数权转账功能已关闭');
+      return;
+    }
     const limit = BigInt(await this.config.getNumber('transfer.limit', 0));
     if (limit > 0n && amount > limit) throw Err.param(`单笔转账不得超过 ${limit} 元`);
     if (!(await this.config.get<boolean>('transfer.enabled', true))) throw Err.featureDisabled('转账功能已关闭');
@@ -155,6 +173,32 @@ export class TransferService {
     return { transferNo: t.transferNo, status: 'COMPLETED' };
   }
 
+  /* ---------------- 数权转账（即时到账） ---------------- */
+
+  async createTokenTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string) {
+    await this.features.assertEnabled('token.transfer');
+    await this.users.verifyTransferPassword(fromId, paymentPassword);
+    await this.checkAmount(amount, 'token');
+    const { from, to } = await this.parties(fromId, toPhone);
+    const riskFlag = await this.checkRisk(from, to, amount, 'token');
+
+    const transferNo = `T${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
+    await this.token.transfer(fromId, to.id, amount, transferNo);
+    const transfer = await this.prisma.tokenTransfer.create({
+      data: {
+        transferNo,
+        fromUserId: fromId,
+        toUserId: to.id,
+        amount,
+        riskFlag,
+        remark,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+      },
+    });
+    return { transferNo: transfer.transferNo, status: transfer.status, riskFlag };
+  }
+
   /** 拒绝转账（转出方或管理员） */
   async rejectWalletTransfer(transferId: bigint, userId: bigint) {
     const t = await this.prisma.walletTransfer.findUnique({ where: { id: transferId } });
@@ -208,13 +252,20 @@ export class TransferService {
     return count;
   }
 
-  async listTransfers(userId: bigint, platform: 'wallet' | 'equity', page = 1, pageSize = 20) {
+  async listTransfers(userId: bigint, platform: 'wallet' | 'equity' | 'token', page = 1, pageSize = 20) {
     const where = { OR: [{ fromUserId: userId }, { toUserId: userId }] };
     const include = {
       fromUser: { select: { id: true, phone: true, nickname: true } },
       toUser: { select: { id: true, phone: true, nickname: true } },
     };
     const take = { orderBy: { createdAt: 'desc' as const }, skip: (page - 1) * pageSize, take: pageSize, include };
+    if (platform === 'token') {
+      const [list, total] = await Promise.all([
+        this.prisma.tokenTransfer.findMany({ where, ...take }),
+        this.prisma.tokenTransfer.count({ where }),
+      ]);
+      return { list, total, page, pageSize };
+    }
     if (platform === 'wallet') {
       const [list, total] = await Promise.all([
         this.prisma.walletTransfer.findMany({ where, ...take }),

@@ -391,6 +391,90 @@ async function main(): Promise<void> {
       );
     }
 
+    /* ---------- 13. 数权互转（即时到账） ---------- */
+    console.log('\n[13] 数权互转（即时到账）');
+    const fromTag = 'A';
+    const toTag = 'B';
+    const fromAccount = accounts.get(fromTag)!;
+    const toAccount = accounts.get(toTag)!;
+
+    // 转出方需先实名并设置转账支付密码
+    await api('/api/me/realname', {
+      method: 'POST',
+      token: fromAccount.token,
+      body: { realName: 'E2E A', idCard: '110101199001011234' },
+    });
+    await api('/api/me/transfer-password', {
+      method: 'POST',
+      token: fromAccount.token,
+      body: { newPassword: '654321' },
+    });
+
+    const TRANSFER_AMOUNT = 100;
+    const [fromBefore, toBefore] = await Promise.all([
+      api<any>('/api/me/token', { token: fromAccount.token }),
+      api<any>('/api/me/token', { token: toAccount.token }),
+    ]);
+
+    const transferResult = await api<any>('/api/me/token/transfers', {
+      method: 'POST',
+      token: fromAccount.token,
+      body: { toPhone: toAccount.phone, amount: TRANSFER_AMOUNT, paymentPassword: '654321', remark: 'E2E 数权互转' },
+    });
+    check('数权转账创建即完成（无需接收方确认）', transferResult.status === 'COMPLETED', transferResult);
+
+    const [fromAfter, toAfter] = await Promise.all([
+      api<any>('/api/me/token', { token: fromAccount.token }),
+      api<any>('/api/me/token', { token: toAccount.token }),
+    ]);
+    check(
+      `${fromTag} 数权余额减少 ${TRANSFER_AMOUNT}`,
+      num(fromBefore.total) - num(fromAfter.total) === TRANSFER_AMOUNT,
+      { before: num(fromBefore.total), after: num(fromAfter.total) },
+    );
+    check(
+      `${toTag} 数权余额增加 ${TRANSFER_AMOUNT}`,
+      num(toAfter.total) - num(toBefore.total) === TRANSFER_AMOUNT,
+      { before: num(toBefore.total), after: num(toAfter.total) },
+    );
+    check(
+      `${fromTag} 累计转出 = ${TRANSFER_AMOUNT}`,
+      num(fromAfter.transferOut) - num(fromBefore.transferOut) === TRANSFER_AMOUNT,
+      { before: num(fromBefore.transferOut), after: num(fromAfter.transferOut) },
+    );
+    check(
+      `${toTag} 累计转入 = ${TRANSFER_AMOUNT}`,
+      num(toAfter.transferIn) - num(toBefore.transferIn) === TRANSFER_AMOUNT,
+      { before: num(toBefore.transferIn), after: num(toAfter.transferIn) },
+    );
+    check(
+      '互转守恒：双方余额合计不变',
+      num(fromBefore.total) + num(toBefore.total) === num(fromAfter.total) + num(toAfter.total),
+      { before: num(fromBefore.total) + num(toBefore.total), after: num(fromAfter.total) + num(toAfter.total) },
+    );
+
+    const fromTx = await api<any>('/api/me/token/transactions?page=1', { token: fromAccount.token });
+    const outTx = (fromTx.list ?? []).find((r: any) => r.bizType === 'token_transfer_out');
+    check(
+      '转出方流水：出账金额正确',
+      !!outTx && num(outTx.changeAmount) === -TRANSFER_AMOUNT,
+      outTx,
+    );
+    const toTx = await api<any>('/api/me/token/transactions?page=1', { token: toAccount.token });
+    const inTx = (toTx.list ?? []).find((r: any) => r.bizType === 'token_transfer_in');
+    check(
+      '接收方流水：入账金额正确',
+      !!inTx && num(inTx.changeAmount) === TRANSFER_AMOUNT,
+      inTx,
+    );
+
+    const records = await api<any>('/api/me/transfers/token?page=1', { token: fromAccount.token });
+    check(
+      '数权转账记录可查询且状态为已完成',
+      (records.list ?? []).some((r: any) => r.transferNo === transferResult.transferNo && r.status === 'COMPLETED'),
+      records.list,
+    );
+
     console.log(`\n=== 结果：通过 ${passed} 项，失败 ${failed} 项 ===`);
   } finally {
     /* ---------- 恢复等级门槛（从高到低，避免触发相邻等级校验） ---------- */

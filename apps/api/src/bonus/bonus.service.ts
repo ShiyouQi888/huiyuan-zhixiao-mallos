@@ -3,6 +3,7 @@ import { BonusRecord } from '@prisma/client';
 import { Err } from '../common/business.exception';
 import { ConfigService } from '../config/config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TokenService } from '../token/token.service';
 
 export interface CreditBonusParams {
   userId: bigint;
@@ -23,6 +24,7 @@ export class BonusService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly token: TokenService,
   ) {}
 
   async creditBonus(params: CreditBonusParams): Promise<BonusRecord | null> {
@@ -85,9 +87,7 @@ export class BonusService {
       });
 
       if (tokenAmount > 0n) {
-        await tx.tokenLot.create({
-          data: { userId: params.userId, amount: tokenAmount, sourceBonusId: record.id },
-        });
+        await this.token.credit(params.userId, tokenAmount, record.id, tx);
       }
       return record;
     });

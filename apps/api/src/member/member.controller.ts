@@ -219,11 +219,15 @@ export class MemberController {
   @Get('me/transfers/:platform')
   async transfers(
     @CurrentUser() current: CurrentUserPayload,
-    @Param('platform') platform: 'wallet' | 'equity',
+    @Param('platform') platform: 'wallet' | 'equity' | 'token',
     @Query('page') page = '1',
   ) {
-    if (platform !== 'wallet' && platform !== 'equity') throw Err.param('资产类型不合法');
-    await this.features.assertEnabled(platform === 'wallet' ? 'wallet.account' : 'equity.account', 'h5', current.rankLevel);
+    if (platform !== 'wallet' && platform !== 'equity' && platform !== 'token') throw Err.param('资产类型不合法');
+    await this.features.assertEnabled(
+      platform === 'wallet' ? 'wallet.account' : platform === 'equity' ? 'equity.account' : 'token.view',
+      'h5',
+      current.rankLevel,
+    );
     return this.transfer.listTransfers(current.id, platform, Number(page));
   }
 
@@ -236,6 +240,22 @@ export class MemberController {
   async token(@CurrentUser() current: CurrentUserPayload) {
     await this.features.assertEnabled('token.view', 'h5', current.rankLevel);
     return this.tokenSvc.summary(current.id);
+  }
+
+  @Get('me/token/transactions')
+  async tokenTransactions(@CurrentUser() current: CurrentUserPayload, @Query('page') page = '1') {
+    await this.features.assertEnabled('token.view', 'h5', current.rankLevel);
+    return this.tokenSvc.transactions(current.id, Number(page));
+  }
+
+  @Post('me/token/transfers')
+  async tokenTransfer(
+    @CurrentUser() current: CurrentUserPayload,
+    @Body() body: { toPhone: string; amount: number; paymentPassword: string; remark?: string },
+  ) {
+    await this.features.assertEnabled('token.view', 'h5', current.rankLevel);
+    await this.features.assertEnabled('transfer.password', 'h5', current.rankLevel);
+    return this.transfer.createTokenTransfer(current.id, body.toPhone, BigInt(body.amount), body.paymentPassword, body.remark);
   }
 
   @Get('referral/qrcode')

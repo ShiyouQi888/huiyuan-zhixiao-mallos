@@ -234,7 +234,8 @@ export function Assets() {
                     <th className="th text-right">金额</th><th className="th">审核状态</th><th className="th">提交时间</th><th className="th text-right">操作</th>
                   </>}
                   {tab === 'tokens' && <>
-                    <th className="th">会员 ID</th><th className="th text-right">累计数权</th><th className="th">账目性质</th>
+                    <th className="th">会员 ID</th><th className="th text-right">当前数权</th><th className="th text-right">累计获得</th>
+                    <th className="th text-right">累计转入 / 转出</th><th className="th">账目性质</th>
                   </>}
                 </tr>
               </thead>
@@ -315,8 +316,10 @@ export function Assets() {
                     </>}
                     {tab === 'tokens' && <>
                       <td className="td mono text-xs text-ink-muted">{row.userId}</td>
-                      <td className="td num text-right font-medium text-ink">{fmtMoney(row._sum?.amount)}</td>
-                      <td className="td"><Badge tone="neutral">只读记账</Badge></td>
+                      <td className="td num text-right font-medium text-ink">{fmtMoney(row.balance)}</td>
+                      <td className="td num text-right">{fmtMoney(row.totalGranted)}</td>
+                      <td className="td num text-right text-xs text-ink-muted">{fmtMoney(row.totalTransferIn)} / {fmtMoney(row.totalTransferOut)}</td>
+                      <td className="td"><Badge tone="neutral">可互转</Badge></td>
                     </>}
                   </tr>
                 ))}

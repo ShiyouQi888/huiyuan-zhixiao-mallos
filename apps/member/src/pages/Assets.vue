@@ -46,8 +46,17 @@ const featureForTab: Record<AssetTab, string> = {
 };
 const tabs = computed(() => allTabs.filter((item) => store.has(featureForTab[item.key])));
 const assetTitle = computed(() => tabs.value.find((item) => item.key === tab.value)?.label ?? '我的资产');
+const transferFeature = computed(() => tab.value === 'wallet' ? 'wallet.transfer' : tab.value === 'equity' ? 'equity.transfer' : 'token.transfer');
+const TX_LABEL: Record<string, string> = {
+  token_bonus: '奖金数权',
+  token_transfer_in: '数权转入',
+  token_transfer_out: '数权转出',
+};
+function txLabel(bizType: string) {
+  return TX_LABEL[bizType] ?? bizType;
+}
 const validTransfer = computed(() => Boolean(toPhone.value.trim()) && Number(amount.value) > 0 && !busy.value &&
-  /^\d{6}$/.test(paymentPassword.value) && store.has(tab.value === 'wallet' ? 'wallet.transfer' : 'equity.transfer'));
+  /^\d{6}$/.test(paymentPassword.value) && store.has(transferFeature.value));
 
 watch(tabs, (available) => {
   if (available.length && !available.some((item) => item.key === tab.value)) tab.value = available[0].key;
@@ -55,17 +64,18 @@ watch(tabs, (available) => {
 
 async function loadTx() {
   if (!store.has(featureForTab[tab.value])) { txs.value = []; return; }
-  if (tab.value === 'token') { txs.value = []; return; }
-  const path = tab.value === 'wallet' ? '/me/wallet/transactions' : '/me/equity/transactions';
+  const path = tab.value === 'wallet'
+    ? '/me/wallet/transactions'
+    : tab.value === 'equity'
+      ? '/me/equity/transactions'
+      : '/me/token/transactions';
   txs.value = (await api<any>(path).catch(() => null))?.list ?? [];
 }
 
 async function loadTransfers(page = transferPage.value) {
-  if (tab.value === 'token') { transfers.value = []; transferTotal.value = 0; return; }
   if (!store.has(featureForTab[tab.value])) { transfers.value = []; transferTotal.value = 0; return; }
   transferPage.value = page;
-  const platform = tab.value === 'wallet' ? 'wallet' : 'equity';
-  const result = await api<any>(`/me/transfers/${platform}?page=${page}`).catch(() => null);
+  const result = await api<any>(`/me/transfers/${tab.value}?page=${page}`).catch(() => null);
   transfers.value = result?.list ?? [];
   transferTotal.value = result?.total ?? 0;
 }
@@ -119,9 +129,9 @@ async function transfer() {
   error.value = '';
   busy.value = true;
   try {
-    const path = tab.value === 'wallet' ? '/me/wallet/transfers' : '/me/equity/transfers';
+    const path = `/me/${tab.value}/transfers`;
     await post(path, { toPhone: toPhone.value.trim(), amount: Number(amount.value), paymentPassword: paymentPassword.value });
-    Toast('转账已发起，等待对方 24 小时内确认', 'success');
+    Toast(tab.value === 'token' ? '数权已即时到账' : '转账已发起，等待对方 24 小时内确认', 'success');
     showTransfer.value = false;
     toPhone.value = ''; amount.value = ''; paymentPassword.value = '';
     await load();
@@ -174,34 +184,39 @@ onMounted(load);
     </section>
 
     <section v-else class="asset-overview asset-overview--token">
-      <div class="asset-overview-top"><span class="asset-icon"><Coins :size="19" aria-hidden="true" /></span><span>累计数权</span></div>
+      <div class="asset-overview-top"><span class="asset-icon"><Coins :size="19" aria-hidden="true" /></span><span>可用数权</span></div>
       <div class="asset-balance">{{ money(token?.total) }}</div>
-      <p class="asset-description">数权为奖金分配中的记账部分，仅作记录，不参与消费与转让。</p>
+      <div class="asset-overview-foot">
+        <span>累计获得 {{ money(token?.granted) }}</span><span>转入 {{ money(token?.transferIn) }}</span><span>转出 {{ money(token?.transferOut) }}</span>
+      </div>
+      <p class="asset-description">数权为奖金分配中的记账部分，可会员间互转、即时到账；不提现、不消费。</p>
+      <button v-if="store.has('token.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="error = ''; showTransfer = true">发起互转</button>
+      <button v-else-if="store.has('token.transfer')" type="button" class="asset-transfer-button" @click="router.push('/security/transfer-password')">设置支付密码</button>
     </section>
 
     <div v-if="tabs.length" class="asset-section-head">
-      <div><h2>{{ tab === 'token' ? '数权说明' : `${assetTitle}流水` }}</h2><p>{{ tab === 'token' ? '了解数权的记录与使用范围' : '按发生时间展示账户变动' }}</p></div>
+      <div><h2>{{ tab === 'token' ? '数权明细' : `${assetTitle}流水` }}</h2><p>按发生时间展示账户变动</p></div>
     </div>
     <div v-if="tabs.length && tab === 'token'" class="asset-note">
-      <Coins :size="18" aria-hidden="true" /><span>数权由平台按奖金规则记账，不可提现、消费或转让。</span>
+      <Coins :size="18" aria-hidden="true" /><span>数权由平台按奖金规则记账，可会员间互转（即时到账），不可提现或消费。</span>
     </div>
-    <div v-else-if="tabs.length && txs.length" class="transaction-list">
+    <div v-if="tabs.length && txs.length" class="transaction-list">
       <article v-for="tx in txs" :key="tx.id" class="transaction-row">
         <span class="transaction-icon" :class="{ 'transaction-icon--out': Number(tx.changeAmount) < 0 }">
           <ArrowDownLeft v-if="Number(tx.changeAmount) >= 0" :size="17" aria-hidden="true" />
           <ArrowUpRight v-else :size="17" aria-hidden="true" />
         </span>
-        <div class="transaction-copy"><strong>{{ tx.bizType }}</strong><span>{{ new Date(tx.createdAt).toLocaleString('zh-CN') }}</span></div>
+        <div class="transaction-copy"><strong>{{ txLabel(tx.bizType) }}</strong><span>{{ new Date(tx.createdAt).toLocaleString('zh-CN') }}</span></div>
         <strong class="transaction-amount" :class="{ 'transaction-amount--positive': Number(tx.changeAmount) >= 0 }">
           {{ Number(tx.changeAmount) >= 0 ? '+' : '' }}{{ money(tx.changeAmount) }}
         </strong>
       </article>
     </div>
-    <EmptyState v-else-if="tabs.length && tab !== 'token'" title="暂无交易流水" description="账户发生变动后，记录会显示在这里" />
+    <EmptyState v-else-if="tabs.length" title="暂无交易流水" description="账户发生变动后，记录会显示在这里" />
 
-    <template v-if="tabs.length && tab !== 'token'">
+    <template v-if="tabs.length">
       <div class="asset-section-head">
-        <div><h2>{{ tab === 'wallet' ? '转账记录' : '转让记录' }}</h2><p>发起后需对方 24 小时内确认</p></div>
+        <div><h2>{{ tab === 'wallet' ? '转账记录' : tab === 'equity' ? '转让记录' : '互转记录' }}</h2><p>{{ tab === 'token' ? '即时到账，无需对方确认' : '发起后需对方 24 小时内确认' }}</p></div>
         <span class="asset-section-count">共 {{ transferTotal }} 笔</span>
       </div>
 
@@ -245,13 +260,13 @@ onMounted(load);
 
     <p v-if="tabs.length" class="asset-disclaimer">平台资产仅限系统内按业务规则使用，具体规则以平台公示为准。</p>
 
-    <AppModal v-if="store.profile?.transferPasswordSet && (store.has('wallet.transfer') || store.has('equity.transfer'))" v-model="showTransfer" eyebrow="资产操作" :title="`发起${tab === 'wallet' ? '转账' : '转让'}`"
-      :description="error || '填写对方手机号与数量，提交后等待对方确认。'"
+    <AppModal v-if="store.profile?.transferPasswordSet && (store.has('wallet.transfer') || store.has('equity.transfer') || store.has('token.transfer'))" v-model="showTransfer" eyebrow="资产操作" :title="`发起${tab === 'wallet' ? '转账' : tab === 'equity' ? '转让' : '互转'}`"
+      :description="error || (tab === 'token' ? '填写对方手机号与数量，提交后即时到账。' : '填写对方手机号与数量，提交后等待对方确认。')"
       :confirm-loading="busy" :confirm-disabled="!validTransfer" confirm-text="确认发起"
-      hint="需验证转账支付密码；对方应在 24 小时内确认，逾期将按平台规则处理。" @confirm="transfer"
+      hint="需验证转账支付密码；数权即时到账，余额与权益值需对方在 24 小时内确认。" @confirm="transfer"
       @cancel="paymentPassword = ''; error = ''">
       <label class="app-field"><span>对方手机号</span><t-input v-model="toPhone" type="tel" placeholder="请输入已实名会员手机号" /></label>
-      <label class="app-field"><span>{{ tab === 'wallet' ? '转账金额' : '转让权益值' }}</span><t-input v-model="amount" type="number" placeholder="请输入数量" /></label>
+      <label class="app-field"><span>{{ tab === 'wallet' ? '转账金额' : tab === 'equity' ? '转让权益值' : '互转数权' }}</span><t-input v-model="amount" type="number" placeholder="请输入数量" /></label>
       <label class="app-field"><span>转账支付密码</span><input v-model="paymentPassword" class="input" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="请输入 6 位数字密码" /></label>
     </AppModal>
   </main>

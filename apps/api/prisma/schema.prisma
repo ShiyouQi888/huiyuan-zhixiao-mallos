@@ -89,7 +89,11 @@ model User {
   walletTransactions   WalletTransaction[]
   walletTransfersFrom  WalletTransfer[]    @relation("WalletTransferFrom")
   walletTransfersTo    WalletTransfer[]    @relation("WalletTransferTo")
+  tokenAccount         TokenAccount?
   tokenLots            TokenLot[]
+  tokenTransactions    TokenTransaction[]
+  tokenTransfersFrom   TokenTransfer[]     @relation("TokenTransferFrom")
+  tokenTransfersTo     TokenTransfer[]     @relation("TokenTransferTo")
   riskEvents           RiskEvent[]
 
   @@index([parentId])
@@ -604,17 +608,72 @@ model WalletTransfer {
   @@index([toUserId, createdAt])
 }
 
+model TokenAccount {
+  userId           BigInt   @id
+  balance          BigInt   @default(0)
+  totalGranted     BigInt   @default(0)
+  totalTransferIn  BigInt   @default(0)
+  totalTransferOut BigInt   @default(0)
+  version          Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model TokenTransaction {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt
+  /// 1 入账 2 出账
+  type         Int      @db.SmallInt
+  changeAmount BigInt
+  balanceAfter BigInt
+  bizType      String   @db.VarChar(64)
+  bizId        String   @db.VarChar(64)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([bizType, bizId])
+  @@index([userId, createdAt])
+}
+
 model TokenLot {
   id            BigInt   @id @default(autoincrement())
   userId        BigInt
   amount        BigInt
   sourceBonusId BigInt?
+  /// BONUS 奖励发放 / TRANSFER_IN 转入
+  sourceType    String   @default("BONUS") @db.VarChar(16)
+  sourceId      String?  @db.VarChar(64)
   createdAt     DateTime @default(now())
 
   user          User         @relation(fields: [userId], references: [id])
   sourceBonus   BonusRecord? @relation(fields: [sourceBonusId], references: [id])
 
   @@index([userId])
+  @@index([userId, sourceType])
+}
+
+model TokenTransfer {
+  id          BigInt   @id @default(autoincrement())
+  transferNo  String   @unique @db.VarChar(64)
+  fromUserId  BigInt
+  toUserId    BigInt
+  amount      BigInt
+  /// 即时到账：创建即 COMPLETED
+  status      String   @default("COMPLETED") @db.VarChar(16)
+  /// 0 正常 1 待审
+  riskFlag    Int      @default(0) @db.SmallInt
+  remark      String?  @db.VarChar(512)
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  fromUser User @relation("TokenTransferFrom", fields: [fromUserId], references: [id])
+  toUser   User @relation("TokenTransferTo", fields: [toUserId], references: [id])
+
+  @@index([fromUserId, createdAt])
+  @@index([toUserId, createdAt])
 }
 
 // ============================================================
