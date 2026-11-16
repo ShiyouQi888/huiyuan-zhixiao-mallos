@@ -410,6 +410,90 @@ export class AdminExtendedController {
     return result;
   }
 
+  /* ============ 奖金参数设置 ============ */
+
+  /** 百分比型参数（前端传 0-100，落库为小数） */
+  private static readonly BONUS_PERCENT_KEYS = [
+    'bonus.reward_rate',
+    'bonus.repurchase_rate',
+    'bonus.peer_rate',
+    'bonus.leader_rate',
+    'bonus.cash_ratio',
+    'bonus.token_ratio',
+  ];
+
+  @Put('bonus/settings')
+  @Roles('SUPER_ADMIN')
+  async updateBonusSettings(
+    @Body() body: Record<string, number>,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    const percentKeys = AdminExtendedController.BONUS_PERCENT_KEYS;
+    const entries = Object.entries(body ?? {}).filter(([, value]) => typeof value === 'number' && Number.isFinite(value));
+    if (entries.length === 0) throw new BusinessException(1001, '未提供有效的奖金参数');
+
+    const patch: Record<string, number> = {};
+    for (const [key, value] of entries) {
+      if (percentKeys.includes(key)) {
+        if (value < 0 || value > 100) throw new BusinessException(1003, `${key} 必须在 0-100 之间`);
+        patch[key] = value / 100;
+      } else if (key === 'bonus.direct_periods') {
+        if (!Number.isInteger(value) || value < 1 || value > 365) {
+          throw new BusinessException(1003, '释放期数必须是 1-365 的整数');
+        }
+        patch[key] = value;
+      } else {
+        throw new BusinessException(1001, `不支持的配置项：${key}`);
+      }
+    }
+
+    const before: Record<string, unknown> = {};
+    const after = await this.prisma.$transaction(async (tx) => {
+      // 未提交的比例项按库中现值补齐，保证「钱包 + 数权 = 100%」校验完整
+      const merged = { ...patch };
+      for (const key of ['bonus.cash_ratio', 'bonus.token_ratio']) {
+        if (merged[key] === undefined) {
+          const row = await tx.config.findUnique({ where: { key } });
+          if (row) merged[key] = Number(row.value);
+        }
+      }
+      if (
+        merged['bonus.cash_ratio'] !== undefined
+        && merged['bonus.token_ratio'] !== undefined
+        && Math.abs(merged['bonus.cash_ratio'] + merged['bonus.token_ratio'] - 1) > 1e-9
+      ) {
+        throw new BusinessException(1003, '钱包与数权分成比例之和必须等于 100%');
+      }
+
+      for (const [key, value] of Object.entries(patch)) {
+        const existing = await tx.config.findUnique({ where: { key } });
+        before[key] = existing?.value ?? null;
+        await tx.config.upsert({
+          where: { key },
+          create: { key, value: value as never, group: 'bonus' },
+          update: { value: value as never, version: { increment: 1 } },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN',
+          operatorId: user.id,
+          action: 'BONUS_SETTINGS',
+          targetType: 'CONFIG',
+          targetId: user.id,
+          before: before as never,
+          after: patch as never,
+          remark: '奖金参数设置',
+        },
+      });
+      return patch;
+    });
+
+    for (const key of Object.keys(patch)) await this.config.invalidate(key);
+    return after;
+  }
+
   @Get('audit-logs')
   @Roles('SUPER_ADMIN')
   auditLogs(@Query('page') page = '1', @Query('action') action?: string) {

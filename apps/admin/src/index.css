@@ -867,13 +867,90 @@ input, select, textarea { font-family: inherit; }
 .brand-mark,
 .brand-mark * { color: var(--on-accent) !important; }
 
-/* 登录页品牌面板：大面积橙色底，使用加深渐变保证白字对比度 */
+/* 登录页：品牌区、输入状态与焦点控件 */
 .login-brand-panel {
-  background: linear-gradient(150deg, #e2480d 0%, #c9460c 55%, #a63a08 100%);
+  isolation: isolate;
+  background: linear-gradient(145deg, #7f2e16 0%, #b94310 48%, #d94d0c 100%);
   color: #fff;
 }
+.login-brand-panel::before,
+.login-brand-panel::after {
+  position: absolute;
+  z-index: -1;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 50%;
+  content: '';
+  pointer-events: none;
+}
+.login-brand-panel::before { top: 13%; right: -160px; width: 420px; height: 420px; }
+.login-brand-panel::after { top: 25%; right: -92px; width: 285px; height: 285px; border-color: rgb(255 255 255 / 0.1); }
 .login-brand-panel .brand-mark,
 .login-brand-panel .brand-mark * { color: #fff !important; }
+.login-grid-texture {
+  z-index: -1;
+  opacity: 0.2;
+  background-image: linear-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(135deg, transparent 8%, #000 100%);
+}
+.login-overline { color: rgb(255 255 255 / 0.72); font-size: 10px; font-weight: 650; letter-spacing: 0.16em; }
+.login-glow { position: absolute; width: 360px; height: 360px; border-radius: 50%; background: var(--accent-soft); filter: blur(80px); }
+.login-glow-top { top: -210px; right: 8%; }
+.login-glow-bottom { bottom: -260px; left: -140px; opacity: 0.65; }
+.login-content { min-width: 0; }
+.login-content .field-label { margin-bottom: 7px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+.login-content .field-hint { margin-top: 6px; color: var(--ink-4); font-size: 11px; }
+.login-control .t-input,
+.login-control .td-input { height: 46px; border-radius: 10px; background: var(--panel); }
+.login-control .t-input { padding-left: 38px; }
+.login-control--password .t-input { padding-right: 38px; }
+.login-control .t-input__inner { height: 44px; font-size: 13px; }
+.login-control .t-input.t-is-focused,
+.login-control .t-input--focused { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.14) !important; }
+.login-password-toggle {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+.login-password-toggle:hover { background: var(--hover); color: var(--ink-2); }
+.login-field-error { margin-top: 5px; color: var(--danger); font-size: 11px; }
+.login-submit { height: 46px; min-height: 46px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+.login-error { border-radius: 9px; }
+
+.permission-assignment { padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.permission-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.permission-module-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  cursor: pointer;
+}
+.permission-module-row input { width: 14px; height: 14px; flex: 0 0 auto; margin: 2px 0 0; }
+.permission-module-row span { display: grid; min-width: 0; gap: 3px; }
+.permission-module-row strong { color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
+.permission-module-row small { color: var(--ink-4); font-size: 10px; line-height: 1.4; }
+.permission-module-row:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--accent-soft); }
+.permission-module-row:has(input:checked) strong { color: var(--accent-ink); }
+.permission-module-row:has(input:disabled) { cursor: default; }
+.permission-module-grid.is-inherited .permission-module-row { opacity: 0.82; }
+
+@media (max-width: 639px) {
+  .login-frame { max-width: 440px; }
+  .login-content { min-height: min(660px, calc(100svh - 40px)); }
+  .permission-module-grid { grid-template-columns: 1fr; }
+}
 
 /* ============================================================
    TDesign 控件品牌化（裸 CSS，禁止移回 @layer）

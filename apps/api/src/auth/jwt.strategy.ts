@@ -17,7 +17,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: { sub: string; phone: string | null; role: string }): Promise<CurrentUserPayload> {
     const user = await this.prisma.user.findUnique({
       where: { id: BigInt(payload.sub) },
-      select: { id: true, phone: true, role: true, rankLevel: true, status: true },
+      select: {
+        id: true,
+        phone: true,
+        role: true,
+        rankLevel: true,
+        status: true,
+        adminPermissionsCustomized: true,
+        adminPermissionCodes: true,
+      },
     });
     if (!user || user.status !== 0) throw new UnauthorizedException('账号不存在或已被冻结');
     return {
@@ -25,6 +33,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       phone: user.phone,
       role: user.role,
       rankLevel: user.rankLevel,
+      adminPermissionsCustomized: user.adminPermissionsCustomized,
+      adminPermissionCodes: user.adminPermissionCodes,
     };
   }
 }

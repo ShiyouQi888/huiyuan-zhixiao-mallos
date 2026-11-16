@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AdminController } from './admin/admin.controller';
 import { AdminExtendedController } from './admin/admin-extended.controller';
 import { AdminModule } from './admin/admin.module';
+import { OperatorAccountsController } from './admin/operator-accounts.controller';
 import { AccessModule } from './access/access.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { ResponseInterceptor } from './common/response.interceptor';
@@ -50,7 +51,7 @@ import { WalletModule } from './wallet/wallet.module';
     TransferModule,
     AdminModule,
   ],
-  controllers: [AuthController, MemberController, OrderController, AdminController, AdminExtendedController],
+  controllers: [AuthController, MemberController, OrderController, AdminController, AdminExtendedController, OperatorAccountsController],
   providers: [
     SettlementService,
     TasksService,

@@ -8,6 +8,7 @@ import { useUserStore } from './stores/user';
  */
 const routes = [
   { path: '/login', component: () => import('./pages/Login.vue'), meta: { immersive: true } },
+  { path: '/register', component: () => import('./pages/Register.vue'), meta: { immersive: true } },
 
   // 四个底部 Tab
   { path: '/', component: () => import('./pages/Mall.vue'), meta: { tab: true, flag: 'product.mall' } },
@@ -38,11 +39,12 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   const token = localStorage.getItem('solar_member_token');
-  if (!token && to.path !== '/login') return '/login';
-  if (token && to.path === '/login') return '/';
+  const guestRoute = to.path === '/login' || to.path === '/register';
+  if (!token && !guestRoute) return '/login';
+  if (token && guestRoute) return '/';
 
   // 功能开关：被关闭的 Tab/页面直接拦截，防止手动输入 hash 绕过
-  if (!token || to.path === '/login') return true;
+  if (!token) return true;
   const store = useUserStore();
   await store.loadFeatures();
   const fallback = store.has('product.mall') ? '/' : '/mine';

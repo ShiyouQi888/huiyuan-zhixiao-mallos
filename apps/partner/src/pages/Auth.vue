@@ -40,8 +40,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh">
-    <ShieldCheck :size="36" style="color:var(--gold)" aria-hidden="true" />
-    <div class="subtitle" style="margin-top:20px">{{ message }}</div>
-  </div>
+  <main class="auth-page auth-page--center">
+    <div class="auth-verify">
+      <span class="icon-tile"><ShieldCheck :size="28" :stroke-width="1.7" aria-hidden="true" /></span>
+      <strong>身份验证</strong>
+      <p>{{ message }}</p>
+    </div>
+  </main>
 </template>

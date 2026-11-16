@@ -55,6 +55,9 @@ model User {
   status               Int       @default(0) @db.SmallInt
   /// SUPER_ADMIN / OPERATOR / FINANCE / SUPPORT / MEMBER
   role                 String    @default("MEMBER") @db.VarChar(32)
+  /// 账号级页面权限；未自定义时按角色默认权限执行
+  adminPermissionsCustomized Boolean @default(false)
+  adminPermissionCodes        String[] @default([])
   deviceFingerprint    String?   @db.VarChar(128)
 
   createdAt            DateTime  @default(now())

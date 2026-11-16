@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, Archive, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardCheck,
+  Activity, Archive, ChevronRight, CircleDollarSign, ClipboardCheck,
   FileBarChart, Files, FolderTree, Gift, LayoutDashboard, LogOut, Menu, Package, ScrollText,
-  Settings2, ShieldAlert, ShoppingBag, Trophy, Users, Wallet, X,
+  Settings2, ShieldAlert, ShoppingBag, Trophy, UserCog, Users, Wallet, X,
 } from 'lucide-react';
 import { Button } from './ui';
 import { ThemeToggle } from './ThemeToggle';
@@ -45,6 +45,7 @@ const navGroups = [
   {
     label: '系统管理',
     items: [
+      { to: '/operators', label: '运营账号', icon: UserCog },
       { to: '/system', label: '系统设置', icon: Archive },
       { to: '/audit', label: '审计日志', icon: ScrollText },
     ],
@@ -86,6 +87,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const logout = () => {
     localStorage.removeItem('solar_admin_token');
+    localStorage.removeItem('solar_admin_access');
     navigate('/login', { replace: true });
   };
 
@@ -96,16 +98,29 @@ export function Layout({ children }: { children: ReactNode }) {
           ${collapsed ? 'w-[72px]' : 'w-[240px]'}
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        <div className={`flex h-[60px] shrink-0 items-center border-b border-line ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>
-          <div className="brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent shadow-xs">
-            <Gift size={17} aria-hidden="true" />
-          </div>
+        <div className={`relative flex h-[60px] shrink-0 items-center border-b border-line ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>
           {!collapsed && (
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-semibold leading-5 text-ink">太阳线会员系统</div>
-              <div className="truncate text-2xs leading-4 text-ink-faint">运营管理平台</div>
-            </div>
+            <>
+              <div className="brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent shadow-xs">
+                <Gift size={17} aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-semibold leading-5 text-ink">太阳线会员系统</div>
+                <div className="truncate text-2xs leading-4 text-ink-faint">运营管理平台</div>
+              </div>
+            </>
           )}
+          <Button
+            onClick={() => setCollapsed((value) => !value)}
+            variant="ghost"
+            size="sm"
+            iconOnly
+            className={collapsed ? 'hidden lg:flex' : 'ml-auto hidden lg:flex'}
+            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            <Menu size={17} />
+          </Button>
           <Button
             onClick={() => setMobileOpen(false)}
             variant="ghost"
@@ -152,14 +167,6 @@ export function Layout({ children }: { children: ReactNode }) {
           >
             <LogOut size={16} strokeWidth={1.9} className="shrink-0" aria-hidden="true" />
             {!collapsed && <span>退出登录</span>}
-          </button>
-          <button
-            type="button"
-            onClick={() => setCollapsed((value) => !value)}
-            className="mt-0.5 hidden h-8 w-full items-center justify-center gap-1.5 rounded-md text-2xs text-ink-faint transition hover:bg-hover hover:text-ink-2 lg:flex"
-            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
-          >
-            {collapsed ? <ChevronRight size={15} /> : <><ChevronLeft size={15} /><span className="truncate">收起侧栏</span></>}
           </button>
         </div>
       </aside>

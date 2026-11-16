@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useFeaturesStore } from './stores/features';
-import { Crown, LayoutDashboard, Network, TrendingUp, Award } from 'lucide-vue-next';
+import { LayoutDashboard, Network, TrendingUp, Award } from 'lucide-vue-next';
 
 const route = useRoute();
 const features = useFeaturesStore();
@@ -20,9 +20,16 @@ const visibleTabs = computed(() => tabs.filter((tab) => !('flag' in tab) || feat
   <div class="phone-shell">
     <router-view />
     <nav v-if="showTab" class="tabbar">
-      <router-link v-for="t in visibleTabs" :key="t.path" :to="t.path" class="tab-item"
-        :class="{ active: route.path === t.path }">
-        <component :is="t.icon" :size="21" :stroke-width="1.8" />
+      <router-link
+        v-for="t in visibleTabs"
+        :key="t.path"
+        :to="t.path"
+        class="tab-item"
+        :class="{ active: route.path === t.path }"
+      >
+        <span class="tab-icon">
+          <component :is="t.icon" :size="21" :stroke-width="1.9" aria-hidden="true" />
+        </span>
         <span>{{ t.label }}</span>
       </router-link>
     </nav>

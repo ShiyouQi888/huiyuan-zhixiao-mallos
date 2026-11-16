@@ -1,42 +1,73 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, ref } from 'vue';
 import { api, money } from '../api';
+import PageHeading from '../components/PageHeading.vue';
+import SectionHeading from '../components/SectionHeading.vue';
+import ListRow from '../components/ListRow.vue';
+import EmptyState from '../components/EmptyState.vue';
+import { Coins } from 'lucide-vue-next';
 
-const router = useRouter();
 const records = ref<any[]>([]);
 const rank = ref<any>(null);
+const loading = ref(true);
+const poolRate = computed(() => (Number(rank.value?.poolRate ?? 0) * 100).toFixed(0));
 
 onMounted(async () => {
   const [r, b] = await Promise.all([
     api<any>('/me/rank').catch(() => null),
     api<any>('/me/bonus/records?type=5').catch(() => null),
   ]);
-  rank.value = r; records.value = b?.list ?? [];
+  rank.value = r; records.value = b?.list ?? []; loading.value = false;
 });
 </script>
 
 <template>
-  <div class="page">
-    <div class="row gap-8" style="margin-bottom:16px">
-      <button class="icon-btn" @click="router.back()">‹</button><div class="title" style="font-size:18px">分红池</div>
-    </div>
+  <main class="page page--partner">
+    <PageHeading
+      back
+      eyebrow="合伙人权益"
+      title="分红池"
+      subtitle="按当前职级参与全网分红池分配"
+    />
 
-    <div class="card hero" style="padding:20px">
-      <div class="subtitle">当前职级分红比例</div>
-      <div class="gold" style="font-size:28px;font-weight:650;margin-top:8px">{{ ((rank?.poolRate??0)*100).toFixed(0) }}%</div>
-      <div class="subtitle" style="font-size:11px;margin-top:12px;line-height:1.7">
-        池子 = 全网当日业绩 × 该级比例，在该等级人数间平均分配。等级恰好等于该级才可参与，人数为 0 时不分配。
+    <section class="card card--hero rank-hero">
+      <div class="rank-hero-head">
+        <div class="rank-identity">
+          <span class="rank-eyebrow">当前职级分红比例</span>
+          <strong class="rank-name">{{ poolRate }}%</strong>
+          <span class="rank-sub">{{ rank?.rankName ?? '—' }} · Lv.{{ rank?.rankLevel ?? 0 }}</span>
+        </div>
+        <span class="rank-badge"><Coins :size="23" aria-hidden="true" /></span>
       </div>
-    </div>
+      <div class="note-card">
+        池子 = <strong>全网当日业绩 × 该级比例</strong>，在该等级人数间平均分配。等级恰好等于该级才可参与，人数为 0 时不分配。
+      </div>
+    </section>
 
-    <div class="section-title" style="margin:22px 0 10px">分红记录</div>
-    <div class="card" style="padding:4px 18px">
-      <div v-if="records.length === 0" class="subtitle" style="padding:24px 0;text-align:center">暂无分红记录</div>
-      <div v-for="r in records" :key="r.id" class="list-row row between">
-        <div><div style="font-size:13px">全网分红池</div><div class="subtitle" style="font-size:11px;margin-top:4px">{{ String(r.settleDate).slice(0,10) }}</div></div>
-        <div class="green" style="font-size:15px;font-weight:650">+¥{{ money(r.amount) }}</div>
-      </div>
+    <SectionHeading title="分红记录" :subtitle="`共 ${records.length} 条，按结算日汇总`" />
+    <div v-if="loading" class="card card--list">
+      <div class="skeleton-block" style="height: 14px; margin: 16px 0" />
+      <div class="skeleton-block" style="height: 14px; margin: 16px 0" />
     </div>
-  </div>
+    <div v-else-if="records.length" class="card card--list">
+      <ListRow
+        v-for="record in records"
+        :key="record.id"
+        title="全网分红池"
+        :subtitle="String(record.settleDate).slice(0, 10)"
+        :value="`+¥${money(record.amount)}`"
+        value-tone="green"
+      >
+        <template #icon>
+          <span class="list-row-icon list-row-icon--gold"><Coins :size="15" aria-hidden="true" /></span>
+        </template>
+      </ListRow>
+    </div>
+    <EmptyState
+      v-else
+      title="暂无分红记录"
+      description="达到对应职级并产生全网分红后，分配记录会出现在这里"
+      :icon="Coins"
+    />
+  </main>
 </template>

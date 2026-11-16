@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CircleDollarSign, Coins, Plus, Wallet } from 'lucide-react';
 import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
+import { BonusSettings } from './BonusSettings';
 import {
   Badge, Button, Card, Empty, ErrorBlock, Field, Modal, PageHeader, Pagination, StatCard, Tabs, TextInput, Toast,
 } from '../components/ui';
@@ -37,6 +38,8 @@ export function Bonuses() {
   const [adjustReason, setAdjustReason] = useState('');
   const [saving, setSaving] = useState(false);
   const canAdjust = ['SUPER_ADMIN', 'OPERATOR'].includes(getAdminRole() ?? '');
+  const canConfigure = getAdminRole() === 'SUPER_ADMIN';
+  const [section, setSection] = useState<'records' | 'settings'>('records');
 
   const loadRecords = useCallback(async () => {
     setError('');
@@ -108,12 +111,32 @@ export function Bonuses() {
   return (
     <>
       <PageHeader
-        title="奖金明细"
-        description="五条收益线的入账记录与 70/30 拆分结果"
-        action={canAdjust ? <Button variant="primary" onClick={openAdjust}><Plus size={15} />发起奖金调整</Button> : undefined}
+        title={section === 'settings' ? '奖金设置' : '奖金明细'}
+        description={section === 'settings'
+          ? '配置五条收益线的比例、拆分比例与直推奖释放期数'
+          : '五条收益线的入账记录与 70/30 拆分结果'}
+        action={section === 'records' && canAdjust
+          ? <Button variant="primary" onClick={openAdjust}><Plus size={15} />发起奖金调整</Button>
+          : undefined}
       />
 
-      <div className="mb-4 grid gap-4 sm:grid-cols-3">
+      {canConfigure && (
+        <Tabs
+          className="mb-4"
+          value={section}
+          onChange={(value) => setSection(value as 'records' | 'settings')}
+          items={[
+            { value: 'records', label: '奖金明细' },
+            { value: 'settings', label: '奖金设置' },
+          ]}
+        />
+      )}
+
+      {section === 'settings' && canConfigure ? (
+        <BonusSettings />
+      ) : (
+        <>
+        <div className="mb-4 grid gap-4 sm:grid-cols-3">
         <StatCard label="当前列表奖金总额" value={fmtMoney(totals.amount)} icon={<CircleDollarSign size={17} />} accent="brand" trend="仅统计当前页记录" />
         <StatCard label="钱包部分（70%）" value={fmtMoney(totals.cash)} icon={<Wallet size={17} />} accent="success" trend="可提现余额入账" />
         <StatCard label="数权部分（30%）" value={fmtMoney(totals.token)} icon={<Coins size={17} />} accent="info" trend="权益值入账" />
@@ -255,6 +278,8 @@ export function Bonuses() {
           </div>
         </div>
       </Modal>
+        </>
+      )}
 
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
     </>

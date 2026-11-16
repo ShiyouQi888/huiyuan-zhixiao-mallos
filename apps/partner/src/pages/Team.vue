@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { api } from '../api';
+import PageHeading from '../components/PageHeading.vue';
+import SectionHeading from '../components/SectionHeading.vue';
+import StatCard from '../components/StatCard.vue';
+import ListRow from '../components/ListRow.vue';
+import StatusTag from '../components/StatusTag.vue';
+import EmptyState from '../components/EmptyState.vue';
+import { Network, UsersRound } from 'lucide-vue-next';
 
 const direct = ref<any[]>([]);
 const tree = ref<any>(null);
@@ -18,44 +25,91 @@ function countNodes(n: any): number {
   if (!n) return 0;
   return 1 + (n.children ?? []).reduce((s: number, c: any) => s + countNodes(c), 0);
 }
+
+function initial(value: unknown): string {
+  return String(value ?? '会').slice(0, 1) || '会';
+}
 </script>
 
 <template>
-  <div class="page">
-    <div class="title">我的团队</div>
-    <div class="subtitle">伞下全部层级，业绩每日自动归集</div>
+  <main class="page page--partner">
+    <PageHeading
+      eyebrow="组织架构"
+      title="我的团队"
+      subtitle="伞下全部层级，业绩每日自动归集"
+    />
 
-    <div class="grid-3" style="margin-top:18px">
-      <div class="card" style="text-align:center;padding:16px 6px"><div style="font-size:20px;font-weight:650">{{ direct.length }}</div><div class="subtitle" style="font-size:10px">直属</div></div>
-      <div class="card" style="text-align:center;padding:16px 6px"><div class="gold" style="font-size:20px;font-weight:650">{{ Math.max(0, countNodes(tree)-1) }}</div><div class="subtitle" style="font-size:10px">团队总数</div></div>
-      <div class="card" style="text-align:center;padding:16px 6px"><div style="font-size:20px;font-weight:650">{{ tree?.children?.length ?? 0 }}</div><div class="subtitle" style="font-size:10px">伞下分支</div></div>
+    <div class="stat-grid stat-grid--3">
+      <StatCard label="直属下级" :value="direct.length" tone="brand" />
+      <StatCard label="团队总数" :value="Math.max(0, countNodes(tree) - 1)" tone="green" />
+      <StatCard label="伞下分支" :value="tree?.children?.length ?? 0" />
     </div>
 
-    <div class="section-title" style="margin:22px 0 10px">直属下级</div>
-    <div class="card" style="padding:4px 18px">
-      <div v-if="loading" class="subtitle" style="padding:20px 0;text-align:center">加载中…</div>
-      <div v-else-if="direct.length === 0" class="subtitle" style="padding:24px 0;text-align:center">暂无直属下级</div>
-      <div v-for="m in direct" :key="m.id" class="list-row row between">
-        <div class="row gap-12">
-          <div style="width:36px;height:36px;border-radius:11px;background:var(--surface-2);display:flex;align-items:center;justify-content:center">{{ (m.nickname ?? '会')[0] }}</div>
-          <div><div style="font-size:13px">{{ m.nickname ?? '会员' }}</div><div class="subtitle" style="font-size:10px;margin-top:3px">{{ m.phone }}</div></div>
-        </div>
-        <div style="text-align:right"><div class="tag">Lv.{{ m.rankLevel }}</div><div class="subtitle" style="font-size:10px;margin-top:4px">{{ m.equityStatus === 1 ? '暂停计酬' : '正常' }}</div></div>
-      </div>
+    <SectionHeading title="直属下级" :subtitle="`共 ${direct.length} 人，按最新加入排序`" />
+    <div v-if="loading" class="card card--list">
+      <div class="skeleton-block" style="height: 14px; margin: 16px 0" />
+      <div class="skeleton-block" style="height: 14px; margin: 16px 0" />
+      <div class="skeleton-block" style="height: 14px; margin: 16px 0" />
     </div>
+    <div v-else-if="direct.length" class="card card--list">
+      <ListRow
+        v-for="m in direct"
+        :key="m.id"
+        :title="m.nickname ?? '会员'"
+        :subtitle="m.phone"
+      >
+        <template #icon>
+          <span class="avatar">{{ initial(m.nickname) }}</span>
+        </template>
+        <template #trailing>
+          <StatusTag tone="brand">Lv.{{ m.rankLevel }}</StatusTag>
+          <StatusTag :tone="m.equityStatus === 1 ? 'danger' : 'green'">
+            {{ m.equityStatus === 1 ? '暂停计酬' : '正常' }}
+          </StatusTag>
+        </template>
+      </ListRow>
+    </div>
+    <EmptyState
+      v-else
+      title="暂无直属下级"
+      description="邀请会员加入后，团队成员与业绩会出现在这里"
+      :icon="UsersRound"
+    />
 
-    <div class="section-title" style="margin:22px 0 10px">团队结构</div>
-    <div class="card" style="padding:18px">
+    <SectionHeading title="团队结构" subtitle="展示伞下前三层分支关系" />
+    <div class="card">
       <template v-if="tree">
-        <div class="row gap-8"><span class="tag">{{ tree.nickname ?? '我' }}</span><span class="subtitle" style="font-size:10px">Lv.{{ tree.rankLevel }}</span></div>
-        <div v-for="c in tree.children ?? []" :key="c.id" style="padding-left:16px;border-left:1px solid var(--line);margin-left:6px;margin-top:8px">
-          <div class="row gap-8" style="padding:4px 0"><span class="muted">└</span><span style="font-size:12px">{{ c.nickname }}</span><span class="subtitle" style="font-size:10px">Lv.{{ c.rankLevel }} · {{ c.children?.length ?? 0 }} 分支</span></div>
-          <div v-for="g in c.children ?? []" :key="g.id" style="padding-left:14px;border-left:1px solid var(--line);margin-left:4px">
-            <div class="row gap-8" style="padding:3px 0;font-size:11px"><span class="muted">└</span><span>{{ g.nickname }}</span><span class="subtitle" style="font-size:9px">Lv.{{ g.rankLevel }}</span></div>
+        <div class="tree">
+          <div class="tree-node tree-node--root">
+            <span class="tree-avatar">我</span>
+            <span class="tree-name">{{ tree.nickname ?? '我' }}</span>
+            <StatusTag tone="brand">Lv.{{ tree.rankLevel }}</StatusTag>
+            <StatusTag class="tree-level" tone="neutral">{{ tree.children?.length ?? 0 }} 分支</StatusTag>
           </div>
+
+          <div v-for="child in tree.children ?? []" :key="child.id" class="tree-branch">
+            <div class="tree-node">
+              <span class="tree-avatar">{{ initial(child.nickname) }}</span>
+              <span class="tree-name">{{ child.nickname }}</span>
+              <StatusTag tone="neutral">Lv.{{ child.rankLevel }}</StatusTag>
+              <span class="tree-meta">{{ child.children?.length ?? 0 }} 分支</span>
+            </div>
+            <div v-for="grand in child.children ?? []" :key="grand.id" class="tree-grandchild">
+              <span class="tree-dot" />
+              <span class="tree-name">{{ grand.nickname }}</span>
+              <span class="tree-meta">Lv.{{ grand.rankLevel }}</span>
+            </div>
+          </div>
+
+          <p v-if="!tree.children?.length" class="tree-empty">暂无下级成员</p>
         </div>
-        <div v-if="!tree.children?.length" class="subtitle" style="font-size:12px">暂无下级</div>
       </template>
+      <EmptyState
+        v-else
+        title="团队结构暂不可用"
+        description="稍后刷新页面，或确认团队数据权限是否已开通"
+        :icon="Network"
+      />
     </div>
-  </div>
+  </main>
 </template>

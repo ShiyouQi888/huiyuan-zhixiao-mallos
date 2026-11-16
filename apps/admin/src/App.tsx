@@ -1,7 +1,7 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
-import { canAccessAdminPath, getAdminRole } from './api';
+import { api, canAccessAdminPath, firstAccessibleAdminPath, getAdminAccessSnapshot, getAdminRole, setAdminAccessSnapshot, type AdminAccessSnapshot } from './api';
 
 const Approvals = lazy(() => import('./pages/Approvals').then((module) => ({ default: module.Approvals })));
 const Assets = lazy(() => import('./pages/Assets').then((module) => ({ default: module.Assets })));
@@ -13,6 +13,7 @@ const FileManager = lazy(() => import('./pages/FileManager').then((module) => ({
 const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Features = lazy(() => import('./pages/Features').then((module) => ({ default: module.Features })));
 const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
+const Operators = lazy(() => import('./pages/Operators').then((module) => ({ default: module.Operators })));
 const Members = lazy(() => import('./pages/Members').then((module) => ({ default: module.Members })));
 const Orders = lazy(() => import('./pages/Orders').then((module) => ({ default: module.Orders })));
 const Reports = lazy(() => import('./pages/Reports').then((module) => ({ default: module.Reports })));
@@ -23,12 +24,37 @@ const SystemSettings = lazy(() => import('./pages/SystemSettings').then((module)
 
 function Protected() {
   const token = localStorage.getItem('solar_admin_token');
-  if (!token) return <Navigate to="/login" replace />;
-  const role = getAdminRole();
   const { pathname } = useLocation();
+  const [access, setAccess] = useState<AdminAccessSnapshot | null>(() => getAdminAccessSnapshot());
+  const [loadingAccess, setLoadingAccess] = useState(true);
+  const [accessError, setAccessError] = useState('');
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    setLoadingAccess(true);
+    api<AdminAccessSnapshot>('/admin/operators/access')
+      .then((snapshot) => {
+        if (!active) return;
+        setAdminAccessSnapshot(snapshot);
+        setAccess(snapshot);
+        setAccessError('');
+      })
+      .catch((error: any) => { if (active) setAccessError(error.message ?? '后台权限加载失败'); })
+      .finally(() => { if (active) setLoadingAccess(false); });
+    return () => { active = false; };
+  }, [token, pathname]);
+
+  if (!token) return <Navigate to="/login" replace />;
+  if (!access && loadingAccess) return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-ink-muted">正在校验后台权限…</div>;
+  if (!access && accessError) return <div className="grid min-h-screen place-items-center bg-canvas px-5 text-sm text-danger">{accessError}</div>;
+
+  const role = access?.role ?? getAdminRole();
   if (!role) return <Navigate to="/login" replace />;
-  if (!canAccessAdminPath(pathname, role)) {
-    return <Navigate to={role === 'SUPPORT' ? '/members' : '/'} replace />;
+  const permissions = access?.permissionCodes ?? null;
+  if (!canAccessAdminPath(pathname, role, permissions)) {
+    const fallback = firstAccessibleAdminPath(role, permissions);
+    return fallback ? <Navigate to={fallback} replace /> : <div className="p-8 text-sm text-ink-muted">当前账号未分配可访问的后台页面。</div>;
   }
   return (
     <Layout>
@@ -59,6 +85,7 @@ export default function App() {
         <Route path="/system" element={<SystemSettings />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/approvals" element={<Approvals />} />
+        <Route path="/operators" element={<Operators />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

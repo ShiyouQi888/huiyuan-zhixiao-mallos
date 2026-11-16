@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { api, money } from '../api';
+import PageHeading from '../components/PageHeading.vue';
+import SectionHeading from '../components/SectionHeading.vue';
+import ProgressBar from '../components/ProgressBar.vue';
+import EmptyState from '../components/EmptyState.vue';
 import { Award, ArrowUpRight, Check, History } from 'lucide-vue-next';
 
 const rank = ref<any>(null);
 const logs = ref<any[]>([]);
+const loading = ref(true);
 const isTopRank = computed(() => Boolean(rank.value) && rank.value.nextRank === null);
+
+const progress = computed(() => {
+  const current = rank.value;
+  if (!current?.nextRank?.threshold) return 0;
+  return Math.min(100, (Number(current.totalPerformance ?? 0) / Number(current.nextRank.threshold)) * 100);
+});
 
 onMounted(async () => {
   const [rankResult, logResult] = await Promise.all([
@@ -14,6 +25,7 @@ onMounted(async () => {
   ]);
   rank.value = rankResult;
   logs.value = logResult?.list ?? [];
+  loading.value = false;
 });
 
 function formatDate(value: string) {
@@ -22,90 +34,111 @@ function formatDate(value: string) {
 </script>
 
 <template>
-  <div class="page partner-rank-page">
-    <div class="title">我的等级</div>
-    <div class="subtitle">团队累计业绩自动升级，等级与规则由平台实时下发</div>
+  <main class="page page--partner">
+    <PageHeading
+      eyebrow="职级体系"
+      title="我的等级"
+      subtitle="团队累计业绩自动升级，等级与规则由平台实时下发"
+    />
 
-    <div class="card hero rank-hero">
-      <div class="row between">
-        <div>
-          <div class="subtitle">当前职级</div>
-          <div class="gold rank-current-name">{{ rank?.rankName ?? '—' }}</div>
-          <div class="subtitle rank-current-level">Lv.{{ rank?.rankLevel ?? 0 }}</div>
+    <div v-if="loading" class="card rank-loading">正在读取等级信息…</div>
+
+    <template v-else-if="rank">
+      <section class="card card--hero rank-hero">
+        <div class="rank-hero-head">
+          <div class="rank-identity">
+            <span class="rank-eyebrow">当前职级</span>
+            <strong class="rank-name">{{ rank.rankName ?? '—' }}</strong>
+            <span class="rank-sub">Lv.{{ rank.rankLevel ?? 0 }}</span>
+          </div>
+          <span class="rank-badge"><Award :size="24" aria-hidden="true" /></span>
         </div>
-        <div class="rank-award-icon"><Award :size="26" aria-hidden="true" /></div>
-      </div>
-      <div class="rank-divider" />
-      <div class="row between">
-        <div><div class="subtitle">团队奖费率</div><div class="gold rank-rate">{{ (Number(rank?.teamRate ?? 0) * 100).toFixed(0) }}%</div></div>
-        <div class="rank-pool"><div class="subtitle">分红池</div><div class="green rank-rate">{{ (Number(rank?.poolRate ?? 0) * 100).toFixed(0) }}%</div></div>
-      </div>
-      <div class="rank-performance"><span class="subtitle">团队累计业绩</span><strong>¥{{ money(rank?.totalPerformance) }}</strong></div>
-      <div v-if="isTopRank" class="rank-state rank-state--complete"><Check :size="14" aria-hidden="true" />已达到最高职级</div>
-      <div v-else-if="rank?.nextRank" class="rank-state"><ArrowUpRight :size="14" aria-hidden="true" />距 {{ rank.nextRank.name }} 还差 ¥{{ money(rank.nextRank.gap) }}</div>
-    </div>
 
-    <div class="section-title rank-section-title">晋升路径</div>
-    <div class="card rank-path">
-      <div v-for="item in rank?.ranks ?? []" :key="item.id" class="rank-row" :class="{ 'rank-row--current': item.level === rank?.rankLevel }">
-        <div class="row gap-12">
-          <span class="rank-level" :class="{ 'rank-level--current': item.level === rank?.rankLevel, 'rank-level--passed': item.level < rank?.rankLevel }">
-            <Check v-if="item.level < rank?.rankLevel" :size="13" aria-hidden="true" />
-            <template v-else>Lv.{{ item.level }}</template>
-          </span>
-          <div>
-            <div class="rank-name">{{ item.name }}<span v-if="item.level === rank?.rankLevel" class="rank-current-tag">当前</span></div>
-            <div class="subtitle rank-threshold">团队累计 ¥{{ money(item.threshold) }}</div>
+        <div class="rank-metrics">
+          <div class="rank-metric rank-metric--brand">
+            <span>团队奖费率</span>
+            <strong>{{ (Number(rank.teamRate ?? 0) * 100).toFixed(0) }}%</strong>
+          </div>
+          <div class="rank-metric rank-metric--green">
+            <span>分红池比例</span>
+            <strong>{{ (Number(rank.poolRate ?? 0) * 100).toFixed(0) }}%</strong>
           </div>
         </div>
-        <div class="rank-rates"><span>团队 {{ (Number(item.teamRate ?? 0) * 100).toFixed(0) }}%</span><span v-if="Number(item.poolRate) > 0">分红 {{ (Number(item.poolRate) * 100).toFixed(0) }}%</span></div>
-      </div>
-    </div>
 
-    <div class="section-title rank-section-title">等级变更记录</div>
-    <div v-if="logs.length" class="card rank-history">
-      <div v-for="log in logs" :key="log.id" class="rank-history-row">
-        <span class="rank-history-icon"><History :size="15" aria-hidden="true" /></span>
-        <div class="rank-history-copy">
-          <div class="rank-name row gap-8">{{ log.fromRankName }}<ArrowUpRight :size="13" aria-hidden="true" />{{ log.toRankName }}</div>
-          <div class="subtitle rank-threshold">{{ log.triggerType === 'MANUAL' ? '管理员调整' : '业绩自动晋升' }} · {{ formatDate(log.createdAt) }}</div>
+        <div class="rank-performance">
+          <span>团队累计业绩</span>
+          <strong>¥{{ money(rank.totalPerformance) }}</strong>
         </div>
-        <span class="subtitle rank-history-performance">累计 ¥{{ money(log.totalPerformance) }}</span>
-      </div>
-    </div>
-    <div v-else class="card rank-history-empty">暂无等级变更记录</div>
-  </div>
-</template>
 
-<style scoped>
-.rank-hero { margin-top: 18px; padding: 20px; }
-.rank-current-name { margin-top: 5px; font-size: 23px; font-weight: 700; }
-.rank-current-level { margin-top: 3px; font-size: 11px; }
-.rank-award-icon { display: flex; width: 50px; height: 50px; align-items: center; justify-content: center; border: 1px solid rgba(212,169,89,.22); border-radius: 15px; background: rgba(212,169,89,.1); color: #e6c27a; }
-.rank-divider { height: 1px; margin: 17px 0; background: var(--line); }
-.rank-pool { text-align: right; }
-.rank-rate { margin-top: 4px; font-size: 19px; font-weight: 700; }
-.rank-performance { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--line); font-size: 11px; }
-.rank-performance strong { font-size: 13px; font-weight: 650; }
-.rank-state { display: flex; align-items: center; gap: 6px; margin-top: 13px; color: var(--gold); font-size: 11px; font-weight: 600; }
-.rank-state--complete { color: var(--green); }
-.rank-section-title { margin: 22px 0 10px; }
-.rank-path { padding: 4px 16px; }
-.rank-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 1px; border-bottom: 1px solid var(--line); }
-.rank-row:last-child { border-bottom: 0; }
-.rank-row--current { margin-inline: -8px; padding-inline: 9px; border-radius: 12px; background: color-mix(in srgb, var(--gold) 8%, var(--surface)); }
-.rank-level { display: flex; width: 38px; height: 30px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 9px; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 650; }
-.rank-level--current { background: rgba(212,169,89,.15); color: var(--gold); }
-.rank-level--passed { background: var(--green-soft); color: var(--green); }
-.rank-name { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
-.rank-current-tag { padding: 2px 5px; border-radius: 5px; background: rgba(212,169,89,.14); color: var(--gold); font-size: 9px; }
-.rank-threshold { margin-top: 4px; font-size: 10px; }
-.rank-rates { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 3px; color: var(--muted); font-size: 10px; }
-.rank-history { padding: 2px 15px; }
-.rank-history-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.rank-history-row:last-child { border-bottom: 0; }
-.rank-history-icon { display: flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; background: rgba(212,169,89,.12); color: var(--gold); }
-.rank-history-copy { min-width: 0; flex: 1; }
-.rank-history-performance { flex: 0 0 auto; font-size: 9px; }
-.rank-history-empty { padding: 23px 15px; color: var(--muted); font-size: 11px; text-align: center; }
-</style>
+        <ProgressBar
+          v-if="rank.nextRank"
+          class="rank-progress"
+          :value="progress"
+          :label="`距 ${rank.nextRank.name}`"
+          :hint="`还差 ¥${money(rank.nextRank.gap)}`"
+        />
+        <div v-else-if="isTopRank" class="rank-state rank-state--complete">
+          <Check :size="14" aria-hidden="true" />已达到最高职级
+        </div>
+      </section>
+
+      <SectionHeading title="晋升路径" subtitle="达到门槛自动升级，费率随职级提升" />
+      <div class="card rank-path">
+        <div
+          v-for="item in rank.ranks ?? []"
+          :key="item.id"
+          class="rank-row"
+          :class="{ 'rank-row--current': item.level === rank.rankLevel }"
+        >
+          <div class="rank-row-main">
+            <span
+              class="rank-step"
+              :class="{
+                'rank-step--current': item.level === rank.rankLevel,
+                'rank-step--passed': item.level < rank.rankLevel,
+              }"
+            >
+              <Check v-if="item.level < rank.rankLevel" :size="13" aria-hidden="true" />
+              <template v-else>Lv.{{ item.level }}</template>
+            </span>
+            <span class="rank-copy">
+              <span class="rank-row-name">
+                {{ item.name }}
+                <span v-if="item.level === rank.rankLevel" class="rank-current-tag">当前</span>
+              </span>
+              <span class="rank-threshold">团队累计 ¥{{ money(item.threshold) }}</span>
+            </span>
+          </div>
+          <div class="rank-rates">
+            <span>团队 {{ (Number(item.teamRate ?? 0) * 100).toFixed(0) }}%</span>
+            <span v-if="Number(item.poolRate) > 0">分红 {{ (Number(item.poolRate) * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+      </div>
+
+      <SectionHeading title="等级变更记录" subtitle="晋升与人工调整都会留痕" />
+      <div v-if="logs.length" class="card card--list">
+        <div v-for="log in logs" :key="log.id" class="history-row">
+          <span class="history-icon"><History :size="15" aria-hidden="true" /></span>
+          <div class="history-copy">
+            <div class="history-title">
+              {{ log.fromRankName }}<ArrowUpRight :size="13" aria-hidden="true" />{{ log.toRankName }}
+            </div>
+            <div class="history-meta">
+              {{ log.triggerType === 'MANUAL' ? '管理员调整' : '业绩自动晋升' }} · {{ formatDate(log.createdAt) }}
+            </div>
+          </div>
+          <span class="history-value">累计 ¥{{ money(log.totalPerformance) }}</span>
+        </div>
+      </div>
+      <EmptyState
+        v-else
+        title="暂无等级变更记录"
+        description="达成晋升门槛或管理员调整职级后，记录会出现在这里"
+        :icon="History"
+      />
+    </template>
+
+    <div v-else class="card rank-loading">等级信息暂时无法加载，请稍后重试。</div>
+  </main>
+</template>

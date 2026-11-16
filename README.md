@@ -358,7 +358,7 @@ POST /api/orders
 ## 12. 部署
 
 1. 构建：`pnpm build`
-2. 后端以 `node dist/main.js` 方式常驻运行（容器内推荐 PM2 或直接 `node`）。
+2. 后端以 `node dist/src/main.js` 方式常驻运行（容器内推荐 PM2 或直接 `node`）。
 3. 前端为纯静态产物，交由 Nginx / CDN / 对象存储托管。
 4. 生产环境必须：替换 `JWT_SECRET`、关闭演示账号、配置真实对象存储、接入 HTTPS。
 5. 数据库建议使用托管 PostgreSQL，并配置定时备份与日结监控告警。

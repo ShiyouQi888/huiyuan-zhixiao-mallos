@@ -5,6 +5,8 @@ export interface CurrentUserPayload {
   phone: string | null;
   role: string;
   rankLevel: number;
+  adminPermissionsCustomized: boolean;
+  adminPermissionCodes: string[];
 }
 
 export const CurrentUser = createParamDecorator(

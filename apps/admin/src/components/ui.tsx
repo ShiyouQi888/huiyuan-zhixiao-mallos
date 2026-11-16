@@ -46,7 +46,7 @@ export function TextInput({ className = '', type = 'text', value, defaultValue, 
       autocomplete={autoComplete}
       disabled={disabled}
       aria-label={ariaLabel}
-      onKeyDown={onKeyDown}
+      onKeydown={onKeyDown ? (_value, { e }) => onKeyDown(e as unknown as React.KeyboardEvent<HTMLInputElement>) : undefined}
       onChange={(nextValue) => onChange?.({ target: { value: String(nextValue) } } as ChangeEvent<HTMLInputElement>)}
     />
   );
