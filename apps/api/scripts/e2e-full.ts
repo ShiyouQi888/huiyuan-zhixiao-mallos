@@ -60,13 +60,6 @@ const RANK_LEVEL: Record<string, number> = {
 const TEAM_RATE: Record<number, number> = { 1: 0.03, 2: 0.06, 3: 0.09, 4: 0.12 };
 /** 平级奖：上级与下级同等级时，上级拿下级团队奖 × peer_rate(1.0) */
 const PEER_EDGES: Array<[string, string]> = [['B', 'C'], ['A', 'B']];
-/** 领导奖：上级从每个等级>0 的下级团队奖中拿 leader_rate(0.5) */
-const LEADER_EDGES: Array<[string, string]> = [
-  ['D', 'L1'], ['D', 'L2'],
-  ['C', 'D'], ['C', 'Z1'], ['C', 'Z2'],
-  ['B', 'C'], ['B', 'Y1'], ['B', 'Y2'],
-  ['A', 'B'], ['A', 'X1'], ['A', 'X2'],
-];
 /** 直推奖：叶子订单 → 其直接上级 */
 const DIRECT_EDGES: Array<[string, string]> = [
   ['L1', 'D'], ['L2', 'D'],
@@ -76,6 +69,15 @@ const DIRECT_EDGES: Array<[string, string]> = [
 ];
 /** 参与 4 级分红池的账号 */
 const POOL4_MEMBERS = ['C', 'B', 'A'];
+
+/**
+ * 团队奖剔除规则：每个直接下线 ≥ 2 条的上级，剔除子树业绩最大的一条线。
+ * D 的两条下线 L1/L2 业绩并列，按 id 较小者剔除 L1。
+ */
+/** 全局剔除：整张网中业绩最大的一条直推线 = A 的直接下线 B 子树（120000） */
+const EXCLUDED_LINE: { parent: string; child: string } = { parent: 'A', child: 'B' };
+/** 仅被剔除线的直接上级需要扣减基数：A = 160000 - 120000 */
+const EFFECTIVE_BASE: Record<string, number> = { A: TEAM_AMOUNT.A - TEAM_AMOUNT.B };
 
 let passed = 0;
 let failed = 0;
@@ -104,6 +106,8 @@ async function api<T = any>(
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
+    // 日结为大批量操作（数千会员时单步可达数分钟），放宽头部超时
+    signal: AbortSignal.timeout(600_000),
   });
   const json = (await res.json()) as { code: number; message: string; data: T };
   if (json.code !== 0) throw new Error(`${path} 返回错误: ${json.code} ${json.message}`);
@@ -204,7 +208,9 @@ async function main(): Promise<void> {
     /* ---------- 3. 产生业绩 ---------- */
     console.log('\n[3] 下单产生业绩（至尊卡 20000/单，权益值全额抵扣）');
     const day1 = new Date().toISOString().slice(0, 10);
-    const day2 = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+    // 直推奖第 1 期 dueAt 为订单完成日的次日 UTC 16:00，
+    // 订单常在本 UTC 日的下午完成，故需再往后一天结算才能覆盖该分期的到期条件
+    const day2 = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
 
     const settle = async (date: string) => {
       const r = await api<any>('/api/admin/settlements/daily/rerun', {
@@ -277,37 +283,35 @@ async function main(): Promise<void> {
     };
 
     /* ---------- 6. 团队奖（type=2） ---------- */
-    console.log('\n[6] 团队奖 = 伞下累计业绩 × 职级费率');
+    console.log('\n[6] 团队奖 = 有效基数 × 职级费率（有效基数已剔除业绩最大的一条线）');
     const teamBonusExpected: Record<string, number> = {};
     for (const tag of REGISTER_ORDER) {
-      teamBonusExpected[tag] = Math.round(TEAM_AMOUNT[tag] * (TEAM_RATE[RANK_LEVEL[tag]] ?? 0));
+      const base = EFFECTIVE_BASE[tag] ?? TEAM_AMOUNT[tag];
+      teamBonusExpected[tag] = Math.round(base * (TEAM_RATE[RANK_LEVEL[tag]] ?? 0));
     }
     for (const tag of REGISTER_ORDER) {
       const actual = await bonusOf(tag, 2);
-      check(`${tag} 团队奖 ${teamBonusExpected[tag]}`, actual === teamBonusExpected[tag], actual);
+      check(`${tag} 团队奖 ${teamBonusExpected[tag]}（基数 ${EFFECTIVE_BASE[tag] ?? TEAM_AMOUNT[tag]}）`,
+        actual === teamBonusExpected[tag], actual);
     }
 
     /* ---------- 7. 平级奖（type=3） ---------- */
-    console.log('\n[7] 平级奖（上级与下级同级时，上级拿下级团队奖 × peer_rate）');
-    const peerExpected = new Map<string, number>();
+    console.log('\n[7] 平级奖：被剔除直推线上的奖励一并剔除');
+    // A↔B 落在被剔除的最大线上（B 子树），故 A 的平级奖为 0
     for (const [parent, child] of PEER_EDGES) {
-      peerExpected.set(parent, (peerExpected.get(parent) ?? 0) + teamBonusExpected[child]);
+      const actual = await bonusOf(parent, 3);
+      check(`${parent} 与 ${child} 属被剔除直推线，平级奖为 0`, actual === 0, actual);
     }
-    for (const [tag, expected] of peerExpected) {
-      const actual = await bonusOf(tag, 3);
-      check(`${tag} 平级奖 ${expected}`, actual === expected, actual);
-    }
-    // D(Lv3) 的上级 C(Lv4) 等级更高，不构成平级
+    // D(Lv3) 的上级 C(Lv4) 等级更高，本就不构成平级
     const dPeer = await bonusOf('D', 3);
     check('D 与上级 C 不同级，平级奖为 0', dPeer === 0, dPeer);
 
     /* ---------- 8. 领导奖（type=4） ---------- */
-    console.log('\n[8] 领导奖（上级拿下级团队奖 × leader_rate）');
-    const leaderExpected = new Map<string, number>();
-    for (const [parent, child] of LEADER_EDGES) {
-      leaderExpected.set(parent, (leaderExpected.get(parent) ?? 0) + Math.round(teamBonusExpected[child] * 0.5));
-    }
-    for (const [tag, expected] of leaderExpected) {
+    console.log('\n[8] 领导奖：被剔除线（B 子树）内不产生奖励，仅 X1/X2 贡献给 A');
+    // B 子树内所有下级（B/C/D/L1/L2/Z1/Z2/Y1/Y2）的奖励被剔除；A 仅从 X1、X2 各拿 1200×0.5
+    const leaderExpected: Record<string, number> = { A: 1200 };
+    for (const tag of REGISTER_ORDER) {
+      const expected = leaderExpected[tag] ?? 0;
       const actual = await bonusOf(tag, 4);
       check(`${tag} 领导奖 ${expected}`, actual === expected, actual);
     }

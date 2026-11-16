@@ -25,6 +25,7 @@ const FIELDS: FieldMeta[] = [
   { key: 'bonus.cash_ratio', label: '钱包分成比例', scope: '奖金拆分', kind: 'percent', max: 100, hint: '奖金进入钱包余额的比例' },
   { key: 'bonus.token_ratio', label: '数权分成比例', scope: '奖金拆分', kind: 'percent', max: 100, hint: '奖金计入数权的比例' },
   { key: 'bonus.direct_periods', label: '直推奖释放期数', scope: '直推奖', kind: 'number', max: 365, hint: '分多少期释放，1-365 的整数' },
+  { key: 'bonus.team_exclude_ratio', label: '团队奖剔除最大线阈值', scope: '团队奖', kind: 'percent', max: 100, hint: '直接下线≥2 条时剔除业绩最大的一条线（其领导奖/平级奖一并剔除）；0=无条件剔除，>0 则仅当占比超过该值才剔除' },
 ];
 
 const EMPTY = Object.fromEntries(FIELDS.map((field) => [field.key, '']));

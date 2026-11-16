@@ -34,6 +34,8 @@ const CONFIGS: Array<{ key: string; value: unknown; group: string; description: 
   { key: 'bonus.cash_ratio', value: 0.7, group: 'bonus', description: '奖金拆分到钱包比例' },
   { key: 'bonus.token_ratio', value: 0.3, group: 'bonus', description: '奖金拆分到数权比例' },
   { key: 'bonus.direct_periods', value: 20, group: 'bonus', description: '直推奖释放期数' },
+  { key: 'bonus.team_exclude_enabled', value: true, group: 'bonus', description: '团队奖是否剔除业绩最大的一条直推线（含其领导奖/平级奖）' },
+  { key: 'bonus.team_exclude_ratio', value: 0, group: 'bonus', description: '剔除最大线的占比阈值，0=无条件剔除（仅需直接下线≥2条）' },
   { key: 'equity.expire_months', value: 12, group: 'equity', description: '权益值有效期（月）' },
   { key: 'transfer.enabled', value: true, group: 'transfer', description: '转账总开关' },
   { key: 'transfer.limit', value: 0, group: 'transfer', description: '单笔转账限额，0=不限' },

@@ -60,6 +60,8 @@ async function api<T = any>(
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
+    // 日结为大批量操作，放宽头部超时
+    signal: AbortSignal.timeout(600_000),
   });
   const json = (await res.json()) as { code: number; message: string; data: T };
   if (json.code !== 0) throw new Error(`${path} 返回错误: ${json.code} ${json.message}`);
@@ -77,6 +79,8 @@ async function apiAllowFail<T = any>(
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
+    // 日结为大批量操作，放宽头部超时
+    signal: AbortSignal.timeout(600_000),
   });
   return res.json() as Promise<{ code: number; message: string; data: T }>;
 }
@@ -223,7 +227,8 @@ async function main(): Promise<void> {
     /* ---------- 4. 最深层下单产生业绩 ---------- */
     console.log('\n[4] 最深层下单（至尊卡 20000，权益值全额抵扣）');
     const day1 = new Date().toISOString().slice(0, 10);
-    const day2 = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+    // 直推奖第 1 期 dueAt 为订单完成日的次日 UTC 16:00，需再往后一天结算才覆盖
+    const day2 = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
 
     await api(`/api/admin/equity/${deepest.userId}/adjust`, {
       method: 'POST',

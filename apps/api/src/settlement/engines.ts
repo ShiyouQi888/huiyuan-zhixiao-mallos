@@ -63,3 +63,64 @@ export function shouldLockPeer(parentLevel: number, childLevel: number, alreadyL
 export function perCapita(pool: bigint, count: number): bigint {
   return count > 0 ? pool / BigInt(count) : 0n;
 }
+
+/** 被剔除的直推线：某上级的直接下线及其整棵子树 */
+export interface ExcludedLine {
+  parentId: bigint;
+  childId: bigint;
+  amount: bigint;
+}
+
+/**
+ * 全局剔除：在整张关系网中找出「业绩最大的一条直推线」。
+ * - 候选条件：该上级的直接下线 ≥ 2 条（单线独苗不参与剔除）；
+ * - ratio > 0 时，还需该线占上级伞下当日业绩的比例超过阈值；
+ * - 业绩并列的时候取 parentId / childId 较小者，保证结果确定性。
+ *
+ * 注意：这是**全局唯一一条**，不是每个上级各剔一条。
+ */
+export function selectGlobalExcludedLine(
+  children: Map<bigint, Array<{ id: bigint; teamAmount: bigint }>>,
+  ratio = 0,
+): ExcludedLine | null {
+  let best: ExcludedLine | null = null;
+  for (const [parentId, list] of children) {
+    if (list.length < 2) continue;
+
+    let childId = list[0].id;
+    let maxAmount = list[0].teamAmount;
+    for (const c of list) {
+      if (c.teamAmount > maxAmount || (c.teamAmount === maxAmount && c.id < childId)) {
+        maxAmount = c.teamAmount;
+        childId = c.id;
+      }
+    }
+    const total = list.reduce((s, c) => s + c.teamAmount, 0n);
+    if (total <= 0n) continue;
+    if (ratio > 0) {
+      // maxAmount / total > ratio（千分比整数比较，避免浮点误差）
+      const scaled = BigInt(Math.round(ratio * 1000));
+      if (maxAmount * 1000n <= total * scaled) continue;
+    }
+    if (
+      !best
+      || maxAmount > best.amount
+      || (maxAmount === best.amount
+        && (parentId < best.parentId || (parentId === best.parentId && childId < best.childId)))
+    ) {
+      best = { parentId, childId, amount: maxAmount };
+    }
+  }
+  return best;
+}
+
+/** 团队奖有效基数：伞下当日业绩减去被剔除线的子树业绩 */
+export function effectiveTeamBase(
+  teamAmount: bigint,
+  children: Array<{ id: bigint; teamAmount: bigint }>,
+  excluded: Set<bigint>,
+): bigint {
+  if (excluded.size === 0) return teamAmount;
+  const removed = children.filter((c) => excluded.has(c.id)).reduce((s, c) => s + c.teamAmount, 0n);
+  return teamAmount - removed;
+}
