@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "ts-node scripts/smoke.ts",
-    "test:e2e": "ts-node scripts/e2e-full.ts"
+    "test:e2e": "ts-node scripts/e2e-full.ts",
+    "test:e2e:depth": "ts-node scripts/e2e-depth.ts"
   },
   "dependencies": {
     "@solar/shared": "workspace:*",

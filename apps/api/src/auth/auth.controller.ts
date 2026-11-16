@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
 import { Err } from '../common/business.exception';
 import { PrismaService } from '../prisma/prisma.service';
-import { RelationService } from '../relation/relation.service';
+import { RelationService, assertDepthAllowed } from '../relation/relation.service';
 import { Public } from './public.decorator';
 
 @Controller('api/auth')
@@ -29,6 +29,7 @@ export class AuthController {
       ? await this.prisma.user.findUnique({ where: { inviteCode: body.inviteCode } })
       : null;
     if (body.inviteCode && (!parent || parent.status !== 0)) throw Err.param('推荐码无效或推荐人已注销');
+    if (parent) assertDepthAllowed(parent.depth + 1);
 
     const inviteCode = await this.relation.generateInviteCode();
     const user = await this.prisma.user.create({

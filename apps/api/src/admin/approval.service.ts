@@ -4,6 +4,7 @@ import { CurrentUserPayload } from '../auth/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserService } from '../user/user.service';
 import { SettlementService } from '../settlement/settlement.service';
+import { assertDepthAllowed } from '../relation/relation.service';
 import { AdminAdjustService } from './admin-adjust.service';
 
 export type ApprovalType = 'RANK_ADJUST' | 'BONUS_ADJUST' | 'SETTLEMENT_RERUN' | 'REBIND';
@@ -94,6 +95,9 @@ export class ApprovalService {
             where: { path: { startsWith: oldPrefix } },
             select: { id: true, path: true, depth: true },
           });
+
+          // 整棵子树一起迁移，需按子树最深节点校验迁移后的层级上限
+          assertDepthAllowed(nextDepth + descendants.reduce((max, d) => Math.max(max, d.depth - member.depth), 0));
 
           await tx.user.update({
             where: { id: userId },

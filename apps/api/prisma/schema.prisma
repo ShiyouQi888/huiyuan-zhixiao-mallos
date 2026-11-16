@@ -38,7 +38,8 @@ model User {
   /// 关系树：parent_id / path / depth
   parentId             BigInt?
   /// 祖先路径，格式 ,1,5,23,（前后均有逗号），伞下查询用 path LIKE '%,id,%'
-  path                 String    @default(",") @db.VarChar(1024)
+  /// 用 Text 而非定长：深度可达 MAX_TREE_DEPTH（1000），定长字段会在数百层后写入失败
+  path                 String    @default(",")
   depth                Int       @default(0)
 
   /// 0 正常计酬 1 暂停计酬
@@ -92,7 +93,10 @@ model User {
   riskEvents           RiskEvent[]
 
   @@index([parentId])
-  @@index([path])
+  // path 为深层物化路径（最长 MAX_TREE_DEPTH × 约 12B ≈ 12KB）。
+  // PG btree 索引单行上限约 2704B，深层 path 会导致写入直接失败，故不设 path 索引：
+  // 伞下查询用 LIKE '%,id,%'（contains）本就全表扫描，startsWith 亦为低频管理操作。
+  @@index([depth])
   @@index([rankId])
   @@index([equityStatus])
   @@index([createdAt])

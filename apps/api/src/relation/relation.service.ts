@@ -1,5 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { Err } from '../common/business.exception';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** 推荐关系最大层级深度（根节点 depth=0，第 N 层 depth=N）。
+ *  path 是物化路径，长度随深度线性增长（每层约 +5 字符），
+ *  既要在数据库侧用 Text 承载，也要在业务侧设上限防止无限扩张。 */
+export const MAX_TREE_DEPTH = 1000;
+
+/** 校验新层级是否超出上限，超出则抛参数异常 */
+export function assertDepthAllowed(nextDepth: number): void {
+  if (nextDepth > MAX_TREE_DEPTH) {
+    throw Err.param(`推荐关系层级已达上限（最大 ${MAX_TREE_DEPTH} 层），无法继续绑定`);
+  }
+}
 
 export interface TreeNode {
   id: string;
@@ -22,10 +35,13 @@ export class RelationService {
     const parent = await this.prisma.user.findUnique({ where: { id: parentId } });
     if (!parent || parent.status !== 0 || parent.id === userId) return false;
 
+    const nextDepth = parent.depth + 1;
+    assertDepthAllowed(nextDepth);
+
     const path = `${parent.path}${parent.id},`;
     await this.prisma.user.update({
       where: { id: userId },
-      data: { parentId: parent.id, path, depth: parent.depth + 1 },
+      data: { parentId: parent.id, path, depth: nextDepth },
     });
     return true;
   }
