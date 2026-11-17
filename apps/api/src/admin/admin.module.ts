@@ -4,14 +4,16 @@ import { ConfigModule } from '../config/config.module';
 import { EquityModule } from '../equity/equity.module';
 import { SettlementService } from '../settlement/settlement.service';
 import { TokenModule } from '../token/token.module';
+import { TransferQuotaModule } from '../transfer-quota/transfer-quota.module';
 import { UserModule } from '../user/user.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ApprovalService } from './approval.service';
 import { AdminAdjustService } from './admin-adjust.service';
+import { FinanceDashboardService } from './finance-dashboard.service';
 
 @Module({
-  imports: [UserModule, WalletModule, EquityModule, TokenModule, ConfigModule, BonusModule],
-  providers: [ApprovalService, AdminAdjustService, SettlementService],
-  exports: [ApprovalService, AdminAdjustService],
+  imports: [UserModule, WalletModule, EquityModule, TokenModule, TransferQuotaModule, ConfigModule, BonusModule],
+  providers: [ApprovalService, AdminAdjustService, SettlementService, FinanceDashboardService],
+  exports: [ApprovalService, AdminAdjustService, FinanceDashboardService],
 })
 export class AdminModule {}

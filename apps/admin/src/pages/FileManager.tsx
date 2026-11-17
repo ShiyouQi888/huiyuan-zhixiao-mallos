@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, FileText, Image as ImageIcon, Trash2, UploadCloud } from 'lucide-react';
-import { api, resolveAssetUrl, del } from '../api';
+import { Check, Copy, Download, Eye, FileArchive, FileText, Image as ImageIcon, Pencil, Trash2, UploadCloud } from 'lucide-react';
+import { api, resolveAssetUrl, del, patch } from '../api';
 import {
-  Badge, Button, Card, CardHeader, Empty, Field, PageHeader, SearchField, Toast, cx, useConfirm,
+  Badge, Button, Card, CardHeader, Empty, Field, Modal, PageHeader, Pagination, SearchField, Toast, cx, useConfirm,
 } from '../components/ui';
 import { ImageCropDialog, PRODUCT_IMAGE_PRESETS, ProductImagePreset } from './ImageCropDialog';
+import './FileManager.css';
 
 export interface FileItem {
   id: string;
@@ -41,6 +42,9 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
   const [files, setFiles] = useState<FileItem[]>([]);
   const [category, setCategory] = useState('ALL');
   const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 24;
   const [uploadCategory, setUploadCategory] = useState('PRODUCT');
   const [uploadPreset, setUploadPreset] = useState<ProductImagePreset>(cropPreset ?? 'product-cover');
   const [selected, setSelected] = useState<string[]>(currentUrls);
@@ -49,6 +53,10 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
   const [tone, setTone] = useState<'success' | 'error' | 'info'>('info');
   const [cropQueue, setCropQueue] = useState<CropQueue | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [renameFile, setRenameFile] = useState<FileItem | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { confirm, confirmNode } = useConfirm();
 
@@ -58,18 +66,19 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
   };
 
   const load = async () => {
-    const q = new URLSearchParams({ category, page: '1' });
+    const q = new URLSearchParams({ category, page: String(page) });
     if (keyword) q.set('keyword', keyword);
     try {
       const result = category === 'UNREFERENCED'
-        ? await api<FileItem[]>('/admin/files/unreferenced')
-        : await api<{ list: FileItem[] }>(`/admin/files?${q}`);
-      setFiles(Array.isArray(result) ? result : (result.list ?? []));
+        ? await api<{ list: FileItem[]; total: number }>(`/admin/files/unreferenced?page=${page}`)
+        : await api<{ list: FileItem[]; total: number }>(`/admin/files?${q}`);
+      setFiles(result.list ?? []);
+      setTotal(Number(result.total ?? 0));
     } catch (error: any) {
       notify(error.message ?? '文件列表加载失败', 'error');
     }
   };
-  useEffect(() => { void load(); }, [category, keyword]);
+  useEffect(() => { void load(); }, [category, keyword, page]);
 
   const sendFile = async (file: File, targetCategory: string): Promise<FileItem> => {
     const form = new FormData();
@@ -133,7 +142,7 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
     if (!cropQueue) return;
     setUploading(true);
     try {
-      const uploaded = await sendFile(croppedFile, 'PRODUCT');
+      const uploaded = await sendFile(croppedFile, cropQueue.preset.startsWith('poster-') ? 'OTHER' : 'PRODUCT');
       await load();
       if (picker) setSelected((current) => current.includes(uploaded.url) ? current : [...current, uploaded.url]);
       notify(`已裁剪并入库：${uploaded.originalName}`, 'success');
@@ -151,6 +160,7 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
       description: '删除后引用该素材的商品图可能失效，此操作不可撤销。',
       confirmText: '删除文件',
       tone: 'danger',
+      confirmationText: `删除 ${name}`,
     });
     if (!agreed) return;
     try {
@@ -159,6 +169,58 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
       setSelected((current) => current.filter((item) => item !== url));
       await load();
     } catch (error: any) { notify(error.message ?? '删除失败', 'error'); }
+  };
+
+  const beginRename = (file: FileItem) => {
+    setRenameFile(file);
+    setRenameValue(file.originalName);
+  };
+
+  const saveRename = async () => {
+    if (!renameFile || renaming) return;
+    const originalName = renameValue.trim();
+    if (!originalName) {
+      notify('请输入文件名称', 'error');
+      return;
+    }
+    setRenaming(true);
+    try {
+      const updated = await patch<FileItem>(`/admin/files/${renameFile.id}`, { originalName });
+      setFiles((current) => current.map((file) => String(file.id) === String(updated.id) ? { ...file, ...updated } : file));
+      setRenameFile(null);
+      notify('文件名称已更新', 'success');
+      await load();
+    } catch (error: any) {
+      notify(error.message ?? '重命名失败', 'error');
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const copyFileUrl = async (file: FileItem) => {
+    try {
+      await navigator.clipboard.writeText(resolveAssetUrl(file.url));
+      notify('文件链接已复制', 'success');
+    } catch {
+      notify('复制失败，请检查浏览器剪贴板权限', 'error');
+    }
+  };
+
+  const downloadFile = async (file: FileItem) => {
+    try {
+      const response = await fetch(resolveAssetUrl(file.url));
+      if (!response.ok) throw new Error('文件下载失败');
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = file.originalName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error: any) {
+      notify(error.message ?? '文件下载失败', 'error');
+    }
   };
 
   const toggle = (url: string) => {
@@ -203,7 +265,7 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
               <>
                 <Field label="商城用途与输出尺寸" className="mb-2">
                   <select className="admin-select" value={uploadPreset} onChange={(event) => setUploadPreset(event.target.value as ProductImagePreset)}>
-                    {Object.entries(PRODUCT_IMAGE_PRESETS).map(([value, preset]) => (
+                    {Object.entries(PRODUCT_IMAGE_PRESETS).filter(([value]) => !value.startsWith('poster-')).map(([value, preset]) => (
                       <option key={value} value={value}>{preset.label}</option>
                     ))}
                   </select>
@@ -255,7 +317,7 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
                 <button
                   key={item.value}
                   type="button"
-                  onClick={() => setCategory(item.value)}
+                  onClick={() => { setCategory(item.value); setPage(1); }}
                   className={cx(
                     'rounded-md px-2.5 py-1 text-xs transition',
                     category === item.value
@@ -271,7 +333,7 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
               className="ml-auto w-44"
               placeholder="搜索文件名"
               value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
+                onChange={(event) => { setKeyword(event.target.value); setPage(1); }}
             />
             {picker && (
               <Button variant="primary" size="sm" onClick={confirmPick}>
@@ -305,10 +367,24 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
                     )}
                     onClick={() => picker && toggle(file.url)}
                   >
-                    <div className="flex h-32 items-center justify-center border-b border-line bg-raised">
+                    <div className="relative flex h-32 items-center justify-center border-b border-line bg-raised">
                       {isImage
                         ? <img src={resolveAssetUrl(file.url)} alt={file.originalName} className="h-full w-full object-contain" loading="lazy" />
-                        : <FileText size={28} className="text-ink-faint" aria-label="文件" />}
+                        : file.mimeType === 'application/zip'
+                          ? <FileArchive size={28} className="text-ink-faint" aria-label="压缩文件" />
+                          : <FileText size={28} className="text-ink-faint" aria-label="文件" />}
+                      {!picker && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewFile(file)}
+                          className="file-preview-trigger absolute inset-0 flex items-end justify-center p-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                          aria-label={`查看文件 ${file.originalName}`}
+                        >
+                          <span className="flex items-center gap-1.5 rounded-md border border-line bg-panel/95 px-2.5 py-1.5 text-2xs font-medium text-ink shadow-xs">
+                            <Eye size={13} aria-hidden="true" />点击查看
+                          </span>
+                        </button>
+                      )}
                     </div>
                     <div className="p-2.5">
                       <div className="truncate text-2xs text-ink-2" title={file.originalName}>{file.originalName}</div>
@@ -316,27 +392,38 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
                         <span className="num text-2xs text-ink-faint">{(file.size / 1024).toFixed(0)} KB</span>
                         <Badge tone="neutral">{CATEGORIES.find((item) => item.value === file.category)?.label ?? file.category}</Badge>
                       </div>
+                      {!picker && (
+                        <div className="mt-2 flex items-center justify-end gap-1 border-t border-line pt-2">
+                          <button
+                            type="button"
+                            onClick={() => beginRename(file)}
+                            className="flex h-7 items-center gap-1 rounded-md px-2 text-2xs text-ink-muted transition hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                            aria-label={`重命名文件 ${file.originalName}`}
+                          >
+                            <Pencil size={12} aria-hidden="true" />重命名
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void remove(file.id, file.url, file.originalName)}
+                            className="flex h-7 items-center gap-1 rounded-md px-2 text-2xs text-ink-muted transition hover:bg-danger-soft hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-danger"
+                            aria-label={`删除文件 ${file.originalName}`}
+                          >
+                            <Trash2 size={12} aria-hidden="true" />删除
+                          </button>
+                        </div>
+                      )}
                     </div>
                     {isSelected && (
                       <div className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-accent-on">
                         <Check size={12} />
                       </div>
                     )}
-                    {!picker && (
-                      <button
-                        type="button"
-                        onClick={(event) => { event.stopPropagation(); void remove(file.id, file.url, file.originalName); }}
-                        className="absolute right-2 top-2 rounded-md border border-line bg-panel/90 p-1.5 text-ink-3 opacity-0 shadow-xs transition hover:text-danger group-hover:opacity-100 focus:opacity-100"
-                        aria-label={`删除文件 ${file.originalName}`}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
                   </div>
                 );
               })}
             </div>
           )}
+          {total > 0 && <Pagination page={page} total={total} pageSize={pageSize} onChange={setPage} unit="个文件" />}
         </Card>
       </div>
 
@@ -350,6 +437,65 @@ export function FileManager({ picker = false, onPick, currentUrls = [], cropPres
           onCancel={advanceCropQueue}
           onConfirm={uploadCroppedFile}
         />
+      )}
+      {previewFile && (
+        <Modal
+          open
+          onClose={() => setPreviewFile(null)}
+          title={previewFile.originalName}
+          description={`${previewFile.mimeType} · ${(previewFile.size / 1024).toFixed(0)} KB · ${CATEGORIES.find((item) => item.value === previewFile.category)?.label ?? previewFile.category}`}
+          size="xl"
+        >
+          <div className="file-preview-stage">
+            {previewFile.mimeType.startsWith('image/') ? (
+              <img src={resolveAssetUrl(previewFile.url)} alt={previewFile.originalName} className="file-preview-image" />
+            ) : previewFile.mimeType === 'application/pdf' ? (
+              <iframe src={resolveAssetUrl(previewFile.url)} title={`预览 ${previewFile.originalName}`} className="file-preview-pdf" />
+            ) : (
+              <div className="file-preview-unsupported">
+                {previewFile.mimeType === 'application/zip' ? <FileArchive size={38} /> : <FileText size={38} />}
+                <strong>此文件类型不支持在线预览</strong>
+                <span>可以下载原文件后在本地查看。</span>
+              </div>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <Button variant="ghost" size="sm" onClick={() => void copyFileUrl(previewFile)}><Copy size={14} />复制链接</Button>
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => void downloadFile(previewFile)}><Download size={14} />下载文件</Button>
+              <Button variant="primary" size="sm" onClick={() => setPreviewFile(null)}>关闭预览</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {renameFile && (
+        <Modal
+          open
+          onClose={() => setRenameFile(null)}
+          title="重命名文件"
+          description="更新素材库中显示的名称，不会更改文件路径或已有业务引用。"
+          size="sm"
+          footer={(
+            <>
+              <Button variant="secondary" onClick={() => setRenameFile(null)} disabled={renaming}>取消</Button>
+              <Button variant="primary" onClick={() => void saveRename()} disabled={renaming || !renameValue.trim()}>
+                {renaming ? '保存中…' : '保存名称'}
+              </Button>
+            </>
+          )}
+        >
+          <Field label="文件名称" required hint="最多 255 个字符，不支持文件系统保留字符。">
+            <input
+              autoFocus
+              className="input"
+              value={renameValue}
+              maxLength={255}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveRename(); } }}
+              placeholder="请输入文件名称"
+            />
+          </Field>
+        </Modal>
       )}
       {confirmNode}
       {toast && <Toast message={toast} tone={tone} onClose={() => setToast('')} />}

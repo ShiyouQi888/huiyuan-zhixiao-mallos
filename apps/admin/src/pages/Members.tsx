@@ -23,16 +23,18 @@ interface MemberTreeNode {
   children: MemberTreeNode[];
 }
 
-interface MemberProfile extends Omit<Member, 'wallet' | 'equityAccount'> {
+interface MemberProfile extends Omit<Member, 'wallet' | 'transferQuotaAccount'> {
   id: string;
   packageExpireAt?: string | null;
   depth: number;
   realNameStatus: number;
+  realName?: string | null;
+  maskedIdCard?: string | null;
   parent?: { id: string; nickname: string | null; phone: string | null } | null;
   rank?: { name: string; level: number } | null;
   package?: { name: string; level: number; price: number } | null;
   wallet?: { balance: number; frozen: number; totalIn: number; totalOut: number } | null;
-  equityAccount?: { balance: number; totalGranted: number; totalUsed: number; totalExpired: number } | null;
+  transferQuotaAccount?: { granted: number; adjustedOut: number; used: number; reserved: number } | null;
 }
 
 function countDescendants(node: MemberTreeNode): number {
@@ -78,7 +80,7 @@ function TeamTreeNode({ node, root = false, rankLabels = {} }: { node: MemberTre
 
 export function Members() {
   const [list, setList] = useState<Member[]>([]);
-  const [ranks, setRanks] = useState<Array<{ level: number; name: string; status: number }>>([]);
+  const [ranks, setRanks] = useState<Array<{ level: number; name: string; status: number; transferQuotaGrant: number }>>([]);
   const [keyword, setKeyword] = useState('');
   const [rankFilter, setRankFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -104,9 +106,13 @@ export function Members() {
   const [createBusy, setCreateBusy] = useState(false);
   const [createForm, setCreateForm] = useState({ nickname: '', phone: '', password: '', referrer: '' });
   const [managedMember, setManagedMember] = useState<Member | null>(null);
-  const [manageTab, setManageTab] = useState<'profile' | 'security' | 'wallet' | 'danger'>('profile');
+  const [manageTab, setManageTab] = useState<'profile' | 'security' | 'wallet' | 'quota' | 'danger'>('profile');
   const [manageBusy, setManageBusy] = useState(false);
-  const [manageForm, setManageForm] = useState({ nickname: '', phone: '', password: '', amount: '', rechargeReason: '', deleteReason: '' });
+  const [manageForm, setManageForm] = useState({
+    nickname: '', phone: '', password: '', amount: '', rechargeReason: '',
+    walletDeductAmount: '', walletDeductReason: '', quotaAmount: '', quotaReason: '',
+    quotaDeductAmount: '', quotaDeductReason: '', deleteReason: '',
+  });
   const [toast, setToast] = useState('');
   const { confirm, confirmNode } = useConfirm();
   const role = getAdminRole();
@@ -120,6 +126,12 @@ export function Members() {
   const manageProfileValid = manageForm.nickname.trim().length >= 2 && /^1[3-9]\d{9}$/.test(manageForm.phone);
   const rechargeFormValid = Number.isSafeInteger(Number(manageForm.amount)) && Number(manageForm.amount) > 0
     && manageForm.rechargeReason.trim().length >= 2;
+  const quotaGrantFormValid = Number.isSafeInteger(Number(manageForm.quotaAmount)) && Number(manageForm.quotaAmount) > 0
+    && manageForm.quotaReason.trim().length >= 2;
+  const walletDeductFormValid = Number.isSafeInteger(Number(manageForm.walletDeductAmount)) && Number(manageForm.walletDeductAmount) > 0
+    && manageForm.walletDeductReason.trim().length >= 2;
+  const quotaDeductFormValid = Number.isSafeInteger(Number(manageForm.quotaDeductAmount)) && Number(manageForm.quotaDeductAmount) > 0
+    && manageForm.quotaDeductReason.trim().length >= 2;
 
   const load = useCallback(() => {
     setLoading(true);
@@ -139,7 +151,7 @@ export function Members() {
   }, [load]);
 
   useEffect(() => {
-    api<Array<{ level: number; name: string; status: number }>>('/admin/members/options/ranks')
+    api<Array<{ level: number; name: string; status: number; transferQuotaGrant: number }>>('/admin/members/options/ranks')
       .then(setRanks)
       .catch((e) => setToast(e.message));
   }, []);
@@ -167,6 +179,14 @@ export function Members() {
 
   const adjust = async () => {
     if (!target) return;
+    const agreed = await confirm({
+      title: '确认调整会员等级？',
+      description: `${target.nickname ?? '该会员'} · ${rankName(target.rankLevel ?? 0)} → ${rankName(level)}。手工调级会影响后续奖励费率与权益通发放；非超管操作将提交复核。`,
+      confirmText: '确认调整等级',
+      tone: 'danger',
+      confirmationText: `调整等级 ${target.nickname ?? target.phone ?? target.id} ${rankName(level)}`,
+    });
+    if (!agreed) return;
     try {
       const result = await post<{ direct?: boolean }>(`/admin/members/${target.id}/rank`, { level });
       setToast(result.direct ? `已将 ${target.nickname ?? '会员'} 调整为${rankName(level)}` : `${target.nickname ?? '会员'} 的等级调整申请已提交，等待财务复核`);
@@ -185,6 +205,7 @@ export function Members() {
       description: `${m.nickname ?? '未设置昵称'} · ${m.phone ?? m.inviteCode}。${m.status === 0 ? '冻结后会员将无法登录与下单。' : '解冻后账号将恢复正常使用。'}`,
       confirmText: `确认${action}`,
       tone: m.status === 0 ? 'danger' : 'primary',
+      confirmationText: `${action}会员 ${m.nickname ?? m.phone ?? m.inviteCode}`,
     });
     if (!agreed) return;
     try {
@@ -198,6 +219,13 @@ export function Members() {
 
   const createMember = async () => {
     if (createBusy) return;
+    const agreed = await confirm({
+      title: '确认创建会员账号？',
+      description: `${createForm.nickname.trim()} · ${createForm.phone}。创建后会生成会员账号和邀请码。`,
+      confirmText: '创建账号',
+      confirmationText: `创建会员 ${createForm.nickname.trim()} ${createForm.phone}`,
+    });
+    if (!agreed) return;
     setCreateBusy(true);
     try {
       const created = await post<{ nickname: string; phone: string; inviteCode: string }>('/admin/members', createForm);
@@ -216,11 +244,22 @@ export function Members() {
   const openManagement = (member: Member) => {
     setManagedMember(member);
     setManageTab(canManageMembers ? 'profile' : 'wallet');
-    setManageForm({ nickname: member.nickname ?? '', phone: member.phone ?? '', password: '', amount: '', rechargeReason: '', deleteReason: '' });
+    setManageForm({
+      nickname: member.nickname ?? '', phone: member.phone ?? '', password: '', amount: '', rechargeReason: '',
+      walletDeductAmount: '', walletDeductReason: '', quotaAmount: '', quotaReason: '',
+      quotaDeductAmount: '', quotaDeductReason: '', deleteReason: '',
+    });
   };
 
   const updateMemberProfile = async () => {
     if (!managedMember || manageBusy) return;
+    const agreed = await confirm({
+      title: '确认更新会员资料？',
+      description: `${managedMember.nickname ?? '该会员'}（${managedMember.phone ?? managedMember.inviteCode}）的昵称或手机号将被修改。`,
+      confirmText: '确认更新资料',
+      confirmationText: `更新会员资料 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode}`,
+    });
+    if (!agreed) return;
     setManageBusy(true);
     try {
       await put(`/admin/members/${managedMember.id}`, { nickname: manageForm.nickname, phone: manageForm.phone });
@@ -236,6 +275,14 @@ export function Members() {
 
   const resetMemberPassword = async () => {
     if (!managedMember || manageBusy) return;
+    const agreed = await confirm({
+      title: '确认重设会员登录密码？',
+      description: `将重设 ${managedMember.nickname ?? '该会员'}（${managedMember.phone ?? managedMember.inviteCode}）的登录密码，并撤销其其他设备会话。`,
+      confirmText: '确认重设密码',
+      tone: 'danger',
+      confirmationText: `重设登录密码 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode}`,
+    });
+    if (!agreed) return;
     setManageBusy(true);
     try {
       await put(`/admin/members/${managedMember.id}/password`, { password: manageForm.password });
@@ -250,14 +297,171 @@ export function Members() {
 
   const rechargeMemberWallet = async () => {
     if (!managedMember || manageBusy) return;
+    const agreed = await confirm({
+      title: '确认增加会员钱包余额？',
+      description: `${managedMember.nickname ?? '该会员'} · ${fmtMoney(manageForm.amount)}。原因：${manageForm.rechargeReason.trim()}。资金变更会记入钱包流水与审计。`,
+      confirmText: '确认增加余额',
+      confirmationText: `增加钱包余额 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode} ${fmtMoney(manageForm.amount)}`,
+    });
+    if (!agreed) return;
     setManageBusy(true);
     try {
-      await post(`/admin/members/${managedMember.id}/wallet/recharge`, { amount: Number(manageForm.amount), reason: manageForm.rechargeReason });
+      const wallet = await post<{ balance: number; frozen: number }>(`/admin/members/${managedMember.id}/wallet/recharge`, { amount: Number(manageForm.amount), reason: manageForm.rechargeReason });
+      setManagedMember({ ...managedMember, wallet: { ...managedMember.wallet, balance: Number(wallet.balance), frozen: Number(wallet.frozen) } });
       setToast(`已为 ${managedMember.nickname ?? '会员'} 钱包充值 ¥${Number(manageForm.amount).toLocaleString('zh-CN')}`);
       setManageForm((form) => ({ ...form, amount: '', rechargeReason: '' }));
       load();
     } catch (e) {
       setToast(e instanceof Error ? e.message : '钱包充值失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const deductMemberWallet = async () => {
+    if (!managedMember || manageBusy || !walletDeductFormValid) return;
+    const agreed = await confirm({
+      title: '确认扣减会员钱包余额？',
+      description: `${managedMember.nickname ?? '该会员'} · ${fmtMoney(manageForm.walletDeductAmount)}。原因：${manageForm.walletDeductReason.trim()}。该扣减会立即写入账务流水。`,
+      confirmText: '确认扣减余额',
+      tone: 'danger',
+      confirmationText: `扣减钱包余额 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode} ${fmtMoney(manageForm.walletDeductAmount)}`,
+    });
+    if (!agreed) return;
+    setManageBusy(true);
+    try {
+      const wallet = await post<{ balance: number; frozen: number }>(`/admin/members/${managedMember.id}/wallet/adjust`, {
+        amount: -Number(manageForm.walletDeductAmount), reason: manageForm.walletDeductReason.trim(),
+      });
+      setManagedMember({ ...managedMember, wallet: { ...managedMember.wallet, balance: Number(wallet.balance), frozen: Number(wallet.frozen) } });
+      setToast(`已扣减 ${fmtMoney(manageForm.walletDeductAmount)} 钱包可用余额`);
+      setManageForm((form) => ({ ...form, walletDeductAmount: '', walletDeductReason: '' }));
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '钱包扣减失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const clearMemberWallet = async () => {
+    if (!managedMember || manageBusy) return;
+    const available = Math.max(0, Number(managedMember.wallet?.balance ?? 0) - Number(managedMember.wallet?.frozen ?? 0));
+    if (available <= 0) return;
+    const agreed = await confirm({
+      title: '清零钱包可用余额？',
+      description: `将扣减 ${fmtMoney(available)}。冻结金额会保留，变更会写入钱包流水和审计。`,
+      confirmText: '确认清零可用余额',
+      tone: 'danger',
+      confirmationText: `清零钱包可用余额 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode} ${fmtMoney(available)}`,
+    });
+    if (!agreed) return;
+    setManageBusy(true);
+    try {
+      const wallet = await post<{ balance: number; frozen: number }>(`/admin/members/${managedMember.id}/wallet/clear-available`, {
+        reason: '会员管理中清零可用钱包余额',
+      });
+      setManagedMember({ ...managedMember, wallet: { ...managedMember.wallet, balance: Number(wallet.balance), frozen: Number(wallet.frozen) } });
+      setToast('钱包可用余额已清零，冻结金额保留');
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '钱包清零失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const grantMemberQuota = async () => {
+    if (!managedMember || manageBusy) return;
+    const agreed = await confirm({
+      title: '确认增加会员权益通？',
+      description: `${managedMember.nickname ?? '该会员'} · ${fmtMoney(manageForm.quotaAmount)}。原因：${manageForm.quotaReason.trim()}。额度变更会写入权益通流水与审计。`,
+      confirmText: '确认增加权益通',
+      confirmationText: `增加权益通 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode} ${fmtMoney(manageForm.quotaAmount)}`,
+    });
+    if (!agreed) return;
+    setManageBusy(true);
+    try {
+      const granted = Number(manageForm.quotaAmount);
+      const account = await post<{ granted: number; adjustedOut: number; used: number; reserved: number }>(
+        `/admin/members/${managedMember.id}/transfer-quota/grant`,
+        { amount: granted, reason: manageForm.quotaReason },
+      );
+      setManagedMember({
+        ...managedMember,
+        transferQuotaAccount: { granted: Number(account.granted), adjustedOut: Number(account.adjustedOut), used: Number(account.used), reserved: Number(account.reserved) },
+      });
+      setToast(`已为 ${managedMember.nickname ?? '会员'} 增加 ${fmtMoney(granted)} 权益通`);
+      setManageForm((form) => ({ ...form, quotaAmount: '', quotaReason: '' }));
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '权益通增加失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const deductMemberQuota = async () => {
+    if (!managedMember || manageBusy || !quotaDeductFormValid) return;
+    const agreed = await confirm({
+      title: '确认减少会员权益通？',
+      description: `${managedMember.nickname ?? '该会员'} · ${fmtMoney(manageForm.quotaDeductAmount)}。原因：${manageForm.quotaDeductReason.trim()}。已使用和预占额度不会被扣减。`,
+      confirmText: '确认减少额度',
+      tone: 'danger',
+      confirmationText: `减少权益通 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode} ${fmtMoney(manageForm.quotaDeductAmount)}`,
+    });
+    if (!agreed) return;
+    setManageBusy(true);
+    try {
+      const account = await post<{ granted: number; adjustedOut: number; used: number; reserved: number }>(
+        `/admin/members/${managedMember.id}/transfer-quota/adjust`,
+        { amount: -Number(manageForm.quotaDeductAmount), reason: manageForm.quotaDeductReason.trim() },
+      );
+      setManagedMember({
+        ...managedMember,
+        transferQuotaAccount: { granted: Number(account.granted), adjustedOut: Number(account.adjustedOut), used: Number(account.used), reserved: Number(account.reserved) },
+      });
+      setToast(`已减少 ${fmtMoney(manageForm.quotaDeductAmount)} 可用权益通`);
+      setManageForm((form) => ({ ...form, quotaDeductAmount: '', quotaDeductReason: '' }));
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '权益通减少失败');
+    } finally {
+      setManageBusy(false);
+    }
+  };
+
+  const clearMemberQuota = async () => {
+    if (!managedMember || manageBusy) return;
+    const available = Math.max(0,
+      Number(managedMember.transferQuotaAccount?.granted ?? 0)
+      - Number(managedMember.transferQuotaAccount?.adjustedOut ?? 0)
+      - Number(managedMember.transferQuotaAccount?.used ?? 0)
+      - Number(managedMember.transferQuotaAccount?.reserved ?? 0),
+    );
+    if (available <= 0) return;
+    const agreed = await confirm({
+      title: '清零可用权益通？',
+      description: `将减少 ${fmtMoney(available)}。已使用与转账预占额度会保留，变更会写入权益通流水和审计。`,
+      confirmText: '确认清零可用额度',
+      tone: 'danger',
+      confirmationText: `清零权益通 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode} ${fmtMoney(available)}`,
+    });
+    if (!agreed) return;
+    setManageBusy(true);
+    try {
+      const account = await post<{ granted: number; adjustedOut: number; used: number; reserved: number }>(
+        `/admin/members/${managedMember.id}/transfer-quota/clear-available`,
+        { reason: '会员管理中清零可用权益通' },
+      );
+      setManagedMember({
+        ...managedMember,
+        transferQuotaAccount: { granted: Number(account.granted), adjustedOut: Number(account.adjustedOut), used: Number(account.used), reserved: Number(account.reserved) },
+      });
+      setToast('可用权益通已清零，已使用和预占额度保留');
+      load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '权益通清零失败');
     } finally {
       setManageBusy(false);
     }
@@ -274,6 +478,7 @@ export function Members() {
       description: `将停用 ${managedMember.nickname ?? '该会员'}（${managedMember.phone ?? managedMember.inviteCode}）并撤销所有登录会话。订单、团队关系、钱包与权益流水都会保留用于审计。`,
       confirmText: '确认注销账号',
       tone: 'danger',
+      confirmationText: `注销 ${managedMember.nickname ?? managedMember.phone ?? managedMember.inviteCode}`,
     });
     if (!agreed) return;
     setManageBusy(true);
@@ -309,6 +514,25 @@ export function Members() {
     }
   };
 
+  const reviewRealname = async (approved: boolean) => {
+    if (!profile) return;
+    const agreed = await confirm({
+      title: approved ? '通过实名认证？' : '驳回实名认证？',
+      description: approved ? '审核通过后，该会员即可使用要求实名的转账功能。' : '驳回后会员可以修改资料并重新提交。',
+      confirmText: approved ? '通过认证' : '驳回申请',
+      tone: approved ? 'primary' : 'danger',
+      confirmationText: `${approved ? '通过' : '驳回'}实名认证 ${profile.nickname ?? profile.phone ?? profile.id}`,
+    });
+    if (!agreed) return;
+    try {
+      const result = await post<{ realNameStatus: number }>(`/admin/members/${profile.id}/realname/review`, { approved });
+      setProfile((current) => current ? { ...current, realNameStatus: result.realNameStatus } : current);
+      setToast(approved ? '实名认证已通过' : '实名认证已驳回');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '实名认证审核失败');
+    }
+  };
+
   const submitRebind = async () => {
     if (!profile || !rebindReason.trim()) return;
     if (parentSearch.trim() && !selectedParent) {
@@ -324,6 +548,17 @@ export function Members() {
       setToast('新推荐人不能与当前会员或现有推荐人相同');
       return;
     }
+    const newParentName = requestedParentId
+      ? selectedParent?.nickname ?? `会员 ${requestedParentId}`
+      : '解除推荐关系';
+    const agreed = await confirm({
+      title: '确认调整会员推荐关系？',
+      description: `${profile.nickname ?? '该会员'}（${profile.phone ?? profile.id}）将关联到：${newParentName}。关系变更会影响后续团队归属与奖励计算，并写入审计记录。`,
+      confirmText: '确认调整关系',
+      tone: 'danger',
+      confirmationText: `调整推荐关系 ${profile.nickname ?? profile.phone ?? profile.id} ${newParentName}`,
+    });
+    if (!agreed) return;
     setRebindBusy(true);
     try {
       const result = await post<{ direct?: boolean }>(`/admin/members/${profile.id}/rebind`, {
@@ -425,7 +660,7 @@ export function Members() {
                   <th className="th">档位</th>
                   <th className="th">等级</th>
                   <th className="th text-right">团队累计业绩</th>
-                  <th className="th">钱包 / 权益值</th>
+                  <th className="th">钱包 / 权益通</th>
                   <th className="th">状态</th>
                   <th className="th text-right">操作</th>
                 </tr>
@@ -458,14 +693,14 @@ export function Members() {
                     <td className="td num text-right font-medium text-ink">{fmtMoney(m.totalTeamPerformance)}</td>
                     <td className="td">
                       <div className="num text-xs text-ink-soft">{fmtMoney(m.wallet?.balance)}</div>
-                      <div className="num text-2xs text-ink-faint">权益 {fmtMoney(m.equityAccount?.balance)}</div>
+                  <div className="num text-2xs text-ink-faint">剩余权益通 {fmtMoney(Math.max(0, Number(m.transferQuotaAccount?.granted ?? 0) - Number(m.transferQuotaAccount?.adjustedOut ?? 0) - Number(m.transferQuotaAccount?.used ?? 0) - Number(m.transferQuotaAccount?.reserved ?? 0)))}</div>
                     </td>
                     <td className="td">
                       <div className="flex flex-wrap items-center gap-1">
                         <Badge tone={m.status === 0 ? 'success' : m.status === 1 ? 'danger' : 'neutral'} dot>
                           {statusLabel(m.status)}
                         </Badge>
-                        {m.equityStatus === 1 && <Badge tone="warning">暂停计酬</Badge>}
+                        {m.transferQuotaStatus === 1 && <Badge tone="warning">权益通已用完</Badge>}
                       </div>
                     </td>
                     <td className="td">
@@ -561,7 +796,7 @@ export function Members() {
               onChange={(value) => setManageTab(value as typeof manageTab)}
               items={[
                 ...(canManageMembers ? [{ value: 'profile', label: '基本资料' }, { value: 'security', label: '密码安全' }] : []),
-                ...(canRecharge ? [{ value: 'wallet', label: '钱包充值' }] : []),
+                ...(canRecharge ? [{ value: 'wallet', label: '钱包充值' }, { value: 'quota', label: '权益通管理' }] : []),
                 ...(canDeleteMembers ? [{ value: 'danger', label: '注销账号' }] : []),
               ]}
             />
@@ -586,7 +821,9 @@ export function Members() {
               <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ProfileMetric label="当前钱包余额" value={fmtMoney(managedMember?.wallet?.balance)} icon={<Wallet size={15} />} />
-                  <ProfileMetric label="当前权益值余额" value={fmtMoney(managedMember?.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
+                  <ProfileMetric label="钱包可用余额" value={fmtMoney(Math.max(0, Number(managedMember?.wallet?.balance ?? 0) - Number(managedMember?.wallet?.frozen ?? 0)))} icon={<CircleDollarSign size={15} />} />
+                  <ProfileMetric label="冻结金额" value={fmtMoney(managedMember?.wallet?.frozen)} icon={<ShieldOff size={15} />} />
+                  <ProfileMetric label="剩余权益通" value={fmtMoney(Math.max(0, Number(managedMember?.transferQuotaAccount?.granted ?? 0) - Number(managedMember?.transferQuotaAccount?.adjustedOut ?? 0) - Number(managedMember?.transferQuotaAccount?.used ?? 0) - Number(managedMember?.transferQuotaAccount?.reserved ?? 0)))} icon={<TrendingUp size={15} />} />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="充值金额（元）" required hint="仅允许正整数，写入钱包流水">
@@ -597,6 +834,56 @@ export function Members() {
                   </Field>
                 </div>
                 <div className="flex justify-end"><Button variant="primary" disabled={manageBusy || !rechargeFormValid} onClick={() => void rechargeMemberWallet()}><Wallet size={14} />确认充值</Button></div>
+                <div className="rounded-xl border border-line bg-panel p-4">
+                  <div className="mb-3 text-sm font-semibold text-ink">扣减或清零可用余额</div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="扣减金额（元）" required hint="正整数；不能超过钱包可用余额">
+                      <TextInput className="input" type="text" value={manageForm.walletDeductAmount} onChange={(event) => setManageForm({ ...manageForm, walletDeductAmount: event.target.value.replace(/\D/g, '') })} placeholder="请输入扣减金额" />
+                    </Field>
+                    <Field label="扣减原因" required hint="2–256 个字符，记录至钱包流水和审计">
+                      <TextInput className="input" value={manageForm.walletDeductReason} onChange={(event) => setManageForm({ ...manageForm, walletDeductReason: event.target.value })} placeholder="填写余额扣减原因" />
+                    </Field>
+                  </div>
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <Button variant="danger" disabled={manageBusy || Number(managedMember?.wallet?.balance ?? 0) <= Number(managedMember?.wallet?.frozen ?? 0)} onClick={() => void clearMemberWallet()}>清零可用余额</Button>
+                    <Button variant="danger" disabled={manageBusy || !walletDeductFormValid} onClick={() => void deductMemberWallet()}>确认扣减</Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {manageTab === 'quota' && canRecharge && (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ProfileMetric label="累计权益通" value={fmtMoney(managedMember?.transferQuotaAccount?.granted)} icon={<CircleDollarSign size={15} />} />
+                  <ProfileMetric label="已调减额度" value={fmtMoney(managedMember?.transferQuotaAccount?.adjustedOut)} icon={<ShieldOff size={15} />} />
+                  <ProfileMetric label="已使用额度" value={fmtMoney(managedMember?.transferQuotaAccount?.used)} icon={<TrendingUp size={15} />} />
+                  <ProfileMetric label="转账预占" value={fmtMoney(managedMember?.transferQuotaAccount?.reserved)} icon={<GitBranch size={15} />} />
+                  <ProfileMetric label="当前可用" value={fmtMoney(Math.max(0, Number(managedMember?.transferQuotaAccount?.granted ?? 0) - Number(managedMember?.transferQuotaAccount?.adjustedOut ?? 0) - Number(managedMember?.transferQuotaAccount?.used ?? 0) - Number(managedMember?.transferQuotaAccount?.reserved ?? 0)))} icon={<Wallet size={15} />} />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="增加额度（元）" required hint="仅允许正整数；额度累计加入权益通账户">
+                    <TextInput className="input" type="text" value={manageForm.quotaAmount} onChange={(event) => setManageForm({ ...manageForm, quotaAmount: event.target.value.replace(/\D/g, '') })} placeholder="请输入增加额度" />
+                  </Field>
+                  <Field label="增加原因" required hint="2–256 个字符，将写入权益通流水与操作审计">
+                    <TextInput className="input" value={manageForm.quotaReason} onChange={(event) => setManageForm({ ...manageForm, quotaReason: event.target.value })} placeholder="填写额度增加原因" />
+                  </Field>
+                </div>
+                <div className="flex justify-end"><Button variant="primary" disabled={manageBusy || !quotaGrantFormValid} onClick={() => void grantMemberQuota()}><Plus size={14} />确认增加权益通</Button></div>
+                <div className="rounded-xl border border-line bg-panel p-4">
+                  <div className="mb-3 text-sm font-semibold text-ink">减少或清零可用权益通</div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="减少额度（元）" required hint="正整数；不能超过当前可用额度">
+                      <TextInput className="input" type="text" value={manageForm.quotaDeductAmount} onChange={(event) => setManageForm({ ...manageForm, quotaDeductAmount: event.target.value.replace(/\D/g, '') })} placeholder="请输入减少额度" />
+                    </Field>
+                    <Field label="减少原因" required hint="2–256 个字符，记录至权益通流水和审计">
+                      <TextInput className="input" value={manageForm.quotaDeductReason} onChange={(event) => setManageForm({ ...manageForm, quotaDeductReason: event.target.value })} placeholder="填写额度减少原因" />
+                    </Field>
+                  </div>
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <Button variant="danger" disabled={manageBusy || Math.max(0, Number(managedMember?.transferQuotaAccount?.granted ?? 0) - Number(managedMember?.transferQuotaAccount?.adjustedOut ?? 0) - Number(managedMember?.transferQuotaAccount?.used ?? 0) - Number(managedMember?.transferQuotaAccount?.reserved ?? 0)) <= 0} onClick={() => void clearMemberQuota()}>清零可用权益通</Button>
+                    <Button variant="danger" disabled={manageBusy || !quotaDeductFormValid} onClick={() => void deductMemberQuota()}>确认减少额度</Button>
+                  </div>
+                </div>
               </div>
             )}
             {manageTab === 'danger' && canDeleteMembers && (
@@ -644,9 +931,16 @@ export function Members() {
             </button>
           ))}
         </div>
+        <div className="notice notice-info mt-4">
+          <CircleDollarSign size={14} />
+          本次调级预计新增权益通 {fmtMoney(target && level > target.rankLevel
+            ? ranks.filter((rank) => rank.status === 1 && rank.level > target.rankLevel && rank.level <= level)
+              .reduce((total, rank) => total + Number(rank.transferQuotaGrant ?? 0), 0)
+            : 0)}；降级或保持当前等级不会增加额度。
+        </div>
         <div className="notice notice-warning mt-4">
           <ShieldOff size={14} />
-          手工调级需双人复核（运营申请 / 财务复核）。该操作将提交等级调整审批，最终结果以审批记录为准。
+          运营提交的调级申请需财务复核；超管操作立即生效。审批通过后按等级配置发放权益通。
         </div>
       </Modal>
 
@@ -677,7 +971,7 @@ export function Members() {
                 value={fmtMoney(Number(profile.wallet?.balance ?? 0) - Number(profile.wallet?.frozen ?? 0))}
                 icon={<Wallet size={15} />}
               />
-              <ProfileMetric label="权益值余额" value={fmtMoney(profile.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
+              <ProfileMetric label="剩余权益通" value={fmtMoney(Math.max(0, Number(profile.transferQuotaAccount?.granted ?? 0) - Number(profile.transferQuotaAccount?.adjustedOut ?? 0) - Number(profile.transferQuotaAccount?.used ?? 0) - Number(profile.transferQuotaAccount?.reserved ?? 0)))} icon={<CircleDollarSign size={15} />} />
             </div>
 
             <Card>
@@ -685,13 +979,19 @@ export function Members() {
                 title="基础信息"
                 icon={<UserRound size={14} />}
                 action={canManageMembers && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => { setNewParentId(''); setParentSearch(''); setSelectedParent(null); setRebindReason(''); setRebindOpen(true); }}
-                  >
-                    <GitBranch size={13} />发起关系换绑
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {profile.realNameStatus === 2 && <>
+                      <Button size="sm" variant="secondary" onClick={() => void reviewRealname(false)}>驳回实名</Button>
+                      <Button size="sm" variant="primary" onClick={() => void reviewRealname(true)}>通过实名</Button>
+                    </>}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => { setNewParentId(''); setParentSearch(''); setSelectedParent(null); setRebindReason(''); setRebindOpen(true); }}
+                    >
+                      <GitBranch size={13} />发起关系换绑
+                    </Button>
+                  </div>
                 )}
               />
               <div className="grid gap-x-6 gap-y-4 p-4 sm:grid-cols-2">
@@ -703,8 +1003,10 @@ export function Members() {
                 <KeyValue label="关系层级" value={`第 ${profile.depth} 层`} />
                 <KeyValue label="注册时间" value={fmtDate(profile.createdAt)} />
                 <KeyValue label="账号状态" value={statusLabel(profile.status)} />
-                <KeyValue label="计酬状态" value={profile.equityStatus === 0 ? '正常计酬' : '暂停计酬'} />
-                <KeyValue label="实名状态" value={profile.realNameStatus === 1 ? '已认证' : '未认证'} />
+                <KeyValue label="权益通状态" value={profile.transferQuotaStatus === 0 ? '仍有剩余' : '已用完，复消后解锁'} />
+                <KeyValue label="实名姓名" value={profile.realName || '—'} />
+                <KeyValue label="证件号码" value={profile.maskedIdCard || '—'} mono />
+                <KeyValue label="实名状态" value={profile.realNameStatus === 1 ? '已认证' : profile.realNameStatus === 2 ? '待审核' : profile.realNameStatus === 3 ? '已驳回' : '未认证'} />
               </div>
             </Card>
 

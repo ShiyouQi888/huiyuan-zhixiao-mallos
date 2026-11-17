@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { BusinessException } from '../common/business.exception';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** 数权：奖励记账部分（30%），支持会员间互转（即时到账）；不提现、不消费 */
+/** 太阳值：奖金分配中的虚拟资产记账部分（默认 30%），支持会员间即时互转。 */
 @Injectable()
 export class TokenService {
   constructor(private readonly prisma: PrismaService) {}
@@ -12,7 +12,7 @@ export class TokenService {
     return tx.tokenAccount.upsert({ where: { userId }, create: { userId }, update: {} });
   }
 
-  /** 发放数权（奖金拆分 30%），按奖金记录幂等 */
+  /** 发放太阳值（奖金拆分比例），按奖金记录幂等 */
   async credit(
     userId: bigint,
     amount: bigint,
@@ -35,7 +35,7 @@ export class TokenService {
         where: { userId, version: acc.version },
         data: { balance: balanceAfter, totalGranted: { increment: amount }, version: { increment: 1 } },
       });
-      if (updated.count === 0) throw new BusinessException(3002, '数权并发冲突，请重试');
+      if (updated.count === 0) throw new BusinessException(3002, '太阳值并发冲突，请重试');
       await tx.tokenTransaction.create({
         data: { userId, type: 1, changeAmount: amount, balanceAfter, bizType, bizId },
       });
@@ -43,7 +43,7 @@ export class TokenService {
     return transaction ? apply(transaction) : this.prisma.$transaction(apply);
   }
 
-  /** 数权互转：即时到账（转出方扣减、接收方入账，双向流水） */
+  /** 太阳值互转：即时到账（转出方扣减、接收方入账，双向流水） */
   async transfer(
     fromId: bigint,
     toId: bigint,
@@ -61,13 +61,13 @@ export class TokenService {
       if (dup) return;
 
       const fromAcc = await this.ensure(fromId, tx);
-      if (fromAcc.balance < amount) throw new BusinessException(3001, '数权余额不足');
+      if (fromAcc.balance < amount) throw new BusinessException(3001, '太阳值余额不足');
       const fromAfter = fromAcc.balance - amount;
       const fromUpdated = await tx.tokenAccount.updateMany({
         where: { userId: fromId, version: fromAcc.version },
         data: { balance: fromAfter, totalTransferOut: { increment: amount }, version: { increment: 1 } },
       });
-      if (fromUpdated.count === 0) throw new BusinessException(3002, '数权并发冲突，请重试');
+      if (fromUpdated.count === 0) throw new BusinessException(3002, '太阳值并发冲突，请重试');
       await tx.tokenTransaction.create({
         data: { userId: fromId, type: 2, changeAmount: -amount, balanceAfter: fromAfter, bizType: 'token_transfer_out', bizId: transferNo },
       });
@@ -82,7 +82,7 @@ export class TokenService {
         where: { userId: toId, version: toAcc.version },
         data: { balance: toAfter, totalTransferIn: { increment: amount }, version: { increment: 1 } },
       });
-      if (toUpdated.count === 0) throw new BusinessException(3002, '数权并发冲突，请重试');
+      if (toUpdated.count === 0) throw new BusinessException(3002, '太阳值并发冲突，请重试');
       await tx.tokenTransaction.create({
         data: { userId: toId, type: 1, changeAmount: amount, balanceAfter: toAfter, bizType: 'token_transfer_in', bizId: transferNo },
       });

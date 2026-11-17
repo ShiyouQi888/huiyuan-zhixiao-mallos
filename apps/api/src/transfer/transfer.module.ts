@@ -5,9 +5,10 @@ import { TokenModule } from '../token/token.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { TransferService } from './transfer.service';
 import { UserModule } from '../user/user.module';
+import { TransferQuotaModule } from '../transfer-quota/transfer-quota.module';
 
 @Module({
-  imports: [WalletModule, EquityModule, TokenModule, FeaturesModule, UserModule],
+  imports: [WalletModule, EquityModule, TokenModule, FeaturesModule, UserModule, TransferQuotaModule],
   providers: [TransferService],
   exports: [TransferService],
 })

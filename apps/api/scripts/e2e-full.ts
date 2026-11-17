@@ -71,13 +71,16 @@ const DIRECT_EDGES: Array<[string, string]> = [
 const POOL4_MEMBERS = ['C', 'B', 'A'];
 
 /**
- * 团队奖剔除规则：每个直接下线 ≥ 2 条的上级，剔除子树业绩最大的一条线。
- * D 的两条下线 L1/L2 业绩并列，按 id 较小者剔除 L1。
+ * 团队奖剔除规则：每个直接下线 ≥ 2 条的上级，分别剔除子树业绩最大的一条线。
+ * D 的两条下线 L1/L2 业绩并列，按 id 较小者剔除 L1；A/B/C/D 均剔除自己的最大线。
  */
-/** 全局剔除：整张网中业绩最大的一条直推线 = A 的直接下线 B 子树（120000） */
-const EXCLUDED_LINE: { parent: string; child: string } = { parent: 'A', child: 'B' };
-/** 仅被剔除线的直接上级需要扣减基数：A = 160000 - 120000 */
-const EFFECTIVE_BASE: Record<string, number> = { A: TEAM_AMOUNT.A - TEAM_AMOUNT.B };
+/** 每位上级只减去自己最大的直接下线子树业绩 */
+const EFFECTIVE_BASE: Record<string, number> = {
+  A: TEAM_AMOUNT.A - TEAM_AMOUNT.B,
+  B: TEAM_AMOUNT.B - TEAM_AMOUNT.C,
+  C: TEAM_AMOUNT.C - TEAM_AMOUNT.D,
+  D: TEAM_AMOUNT.D - ORDER_AMOUNT,
+};
 
 let passed = 0;
 let failed = 0;
@@ -293,7 +296,7 @@ async function main(): Promise<void> {
     };
 
     /* ---------- 6. 团队奖（type=2） ---------- */
-    console.log('\n[6] 团队奖 = 有效基数 × 职级费率（有效基数已剔除业绩最大的一条线）');
+    console.log('\n[6] 团队奖 = 有效基数 × 职级费率（每位会员均已剔除自己的最大推广线）');
     const teamBonusExpected: Record<string, number> = {};
     for (const tag of REGISTER_ORDER) {
       const base = EFFECTIVE_BASE[tag] ?? TEAM_AMOUNT[tag];
@@ -306,20 +309,20 @@ async function main(): Promise<void> {
     }
 
     /* ---------- 7. 平级奖（type=3） ---------- */
-    console.log('\n[7] 平级奖：被剔除直推线上的奖励一并剔除');
-    // A↔B 落在被剔除的最大线上（B 子树），故 A 的平级奖为 0
+    console.log('\n[7] 平级奖：各自被剔除的直接推广关系不产生平级奖');
+    // A→B 与 B→C 分别是各自上级的最大推广线，平级奖都为 0。
     for (const [parent, child] of PEER_EDGES) {
       const actual = await bonusOf(parent, 3);
-      check(`${parent} 与 ${child} 属被剔除直推线，平级奖为 0`, actual === 0, actual);
+      check(`${parent}→${child} 属该上级被剔除推广线，平级奖为 0`, actual === 0, actual);
     }
     // D(Lv3) 的上级 C(Lv4) 等级更高，本就不构成平级
     const dPeer = await bonusOf('D', 3);
     check('D 与上级 C 不同级，平级奖为 0', dPeer === 0, dPeer);
 
     /* ---------- 8. 领导奖（type=4） ---------- */
-    console.log('\n[8] 领导奖：被剔除线（B 子树）内不产生奖励，仅 X1/X2 贡献给 A');
-    // B 子树内所有下级（B/C/D/L1/L2/Z1/Z2/Y1/Y2）的奖励被剔除；A 仅从 X1、X2 各拿 1200×0.5
-    const leaderExpected: Record<string, number> = { A: 1200 };
+    console.log('\n[8] 领导奖：每条推广线内仅排除对应上级与该直推下级的关系');
+    // A/B/C 各从两条未剔除线获得 1200×0.5；D 从一条未剔除线获得 1200×0.5。
+    const leaderExpected: Record<string, number> = { A: 1200, B: 1200, C: 1200, D: 600 };
     for (const tag of REGISTER_ORDER) {
       const expected = leaderExpected[tag] ?? 0;
       const actual = await bonusOf(tag, 4);

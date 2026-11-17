@@ -60,6 +60,7 @@ export class ApprovalService {
       approval.type as ApprovalType,
       approval.payload as Record<string, unknown>,
       reviewer.id,
+      approval.id,
     );
     return this.prisma.approval.update({
       where: { id },
@@ -67,13 +68,14 @@ export class ApprovalService {
     });
   }
 
-  private async execute(type: ApprovalType, payload: Record<string, unknown>, operatorId: bigint) {
+  private async execute(type: ApprovalType, payload: Record<string, unknown>, operatorId: bigint, approvalId?: bigint) {
     switch (type) {
       case 'RANK_ADJUST':
         return this.users.adjustRank(BigInt(payload.userId as string), Number(payload.level));
       case 'BONUS_ADJUST':
         return this.adjust.adjustBonus(
           BigInt(payload.userId as string), BigInt(payload.amount as number), String(payload.reason ?? '手工调整奖金'), operatorId,
+          approvalId ? `approval:${approvalId}` : undefined,
         );
       case 'SETTLEMENT_RERUN':
         return this.settlement.settle(payload.date ? new Date(payload.date as string) : undefined, true);

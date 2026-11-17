@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import { Check, Image as ImageIcon, Move, RotateCcw, X, ZoomIn } from 'lucide-react';
 import { Button } from '../components/ui';
 
-export type ProductImagePreset = 'product-cover' | 'product-detail';
+export type ProductImagePreset = 'product-cover' | 'product-detail' | 'poster-background' | 'poster-image';
 
 export const PRODUCT_IMAGE_PRESETS: Record<ProductImagePreset, {
   label: string;
   description: string;
   width: number;
-  aspect: 'square' | 'source';
+  aspect: 'square' | 'source' | 'portrait';
 }> = {
   'product-cover': {
     label: '商品主图',
@@ -21,6 +21,18 @@ export const PRODUCT_IMAGE_PRESETS: Record<ProductImagePreset, {
     label: '详情长图',
     description: '750 px 宽 · 高度按裁剪内容自适应，源图较小时不放大',
     width: 750,
+    aspect: 'source',
+  },
+  'poster-background': {
+    label: '邀请海报背景',
+    description: '1080 × 1920 px · 9:16 竖版，适配 H5 邀请海报',
+    width: 1080,
+    aspect: 'portrait',
+  },
+  'poster-image': {
+    label: '邀请海报图片素材',
+    description: '保留图片原始比例，透明 PNG / WebP 适用于品牌 Logo',
+    width: 1080,
     aspect: 'source',
   },
 };
@@ -43,10 +55,14 @@ function exportCrop(file: File, image: HTMLImageElement, crop: CropRect, preset:
   const definition = PRODUCT_IMAGE_PRESETS[preset];
   let outputWidth = preset === 'product-cover'
     ? definition.width
-    : Math.min(definition.width, Math.max(1, Math.round(crop.width)));
+    : preset === 'poster-background'
+      ? definition.width
+      : Math.min(definition.width, Math.max(1, Math.round(crop.width)));
   let outputHeight = preset === 'product-cover'
     ? definition.width
-    : Math.max(1, Math.round(outputWidth * crop.height / crop.width));
+    : preset === 'poster-background'
+      ? 1920
+      : Math.max(1, Math.round(outputWidth * crop.height / crop.width));
 
   // Keep unusually long detail images within a safe canvas allocation while preserving ratio.
   if (outputHeight > 10000) {
@@ -93,7 +109,9 @@ export function ImageCropDialog({ file, preset, progress, busy = false, onCancel
   const definition = PRODUCT_IMAGE_PRESETS[preset];
   const ratio = useMemo(() => {
     if (!natural.width || !natural.height) return 1;
-    return definition.aspect === 'square' ? 1 : natural.width / natural.height;
+    if (definition.aspect === 'square') return 1;
+    if (definition.aspect === 'portrait') return 9 / 16;
+    return natural.width / natural.height;
   }, [definition.aspect, natural.height, natural.width]);
   const preview = useMemo(() => {
     if (!natural.width || !natural.height) return { width: 0, height: 0, scale: 0 };
@@ -172,7 +190,9 @@ export function ImageCropDialog({ file, preset, progress, busy = false, onCancel
 
   const outputSize = preset === 'product-cover'
     ? '800 × 800 px'
-    : `${Math.min(definition.width, Math.max(1, Math.round(crop.width)))} × ${Math.max(1, Math.round(Math.min(definition.width, Math.max(1, Math.round(crop.width))) * crop.height / Math.max(1, crop.width)))} px`;
+    : preset === 'poster-background'
+      ? '1080 × 1920 px'
+      : `${Math.min(definition.width, Math.max(1, Math.round(crop.width)))} × ${Math.max(1, Math.round(Math.min(definition.width, Math.max(1, Math.round(crop.width))) * crop.height / Math.max(1, crop.width)))} px`;
 
   return createPortal(
     <div className="modal-backdrop z-[100]" role="dialog" aria-modal="true" aria-labelledby="image-crop-title">
@@ -180,7 +200,7 @@ export function ImageCropDialog({ file, preset, progress, busy = false, onCancel
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
             <div className="flex items-center gap-1.5 text-2xs font-medium text-accent-ink">
-              <ImageIcon size={14} /> 商品图片处理
+              <ImageIcon size={14} /> {preset.startsWith('poster-') ? '邀请海报素材处理' : '商品图片处理'}
             </div>
             <h2 id="image-crop-title" className="mt-1 text-base font-semibold text-ink">{definition.label}裁剪</h2>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-ink-muted">{definition.description}</p>

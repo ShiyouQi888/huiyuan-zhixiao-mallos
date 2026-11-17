@@ -1,12 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Post, Put, Query } from '@nestjs/common';
+import QRCode from 'qrcode';
+import { DEFAULT_REFERRAL_POSTER_TEMPLATE, type ReferralPosterTemplate } from '@solar/shared';
 import { BonusService } from '../bonus/bonus.service';
 import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
 import { Err } from '../common/business.exception';
+import { ConfigService } from '../config/config.service';
 import { EquityService } from '../equity/equity.service';
 import { FeaturesService } from '../features/features.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RelationService } from '../relation/relation.service';
 import { TokenService } from '../token/token.service';
+import { TransferQuotaService } from '../transfer-quota/transfer-quota.service';
 import { TransferService } from '../transfer/transfer.service';
 import { UserService } from '../user/user.service';
 import type { AddressInput } from '../user/user.service';
@@ -22,9 +26,11 @@ export class MemberController {
     private readonly walletSvc: WalletService,
     private readonly equitySvc: EquityService,
     private readonly tokenSvc: TokenService,
+    private readonly transferQuota: TransferQuotaService,
     private readonly bonus: BonusService,
     private readonly transfer: TransferService,
     private readonly features: FeaturesService,
+    private readonly config: ConfigService,
   ) {}
 
   @Get('packages')
@@ -70,14 +76,18 @@ export class MemberController {
   @Get('me')
   async me(@CurrentUser() current: CurrentUserPayload) {
     const profile = await this.users.me(current.id);
-    const [walletVisible, equityVisible] = await Promise.all([
+    const [walletVisible, quotaVisible] = await Promise.all([
       this.features.isAvailable('wallet.account', 'h5', current.rankLevel),
-      this.features.isAvailable('equity.account', 'h5', current.rankLevel),
+      this.features.isAvailable('wallet.transfer_quota', 'h5', current.rankLevel),
+    ]);
+    const [wallet, transferQuotaAccount] = await Promise.all([
+      walletVisible ? this.walletSvc.get(current.id) : Promise.resolve(null),
+      quotaVisible ? this.transferQuota.getAccount(current.id) : Promise.resolve(null),
     ]);
     return {
       ...profile,
-      wallet: walletVisible ? profile.wallet : null,
-      equityAccount: equityVisible ? profile.equityAccount : null,
+      wallet,
+      transferQuotaAccount,
     };
   }
 
@@ -100,6 +110,7 @@ export class MemberController {
 
   @Post('me/realname')
   async realname(@CurrentUser() current: CurrentUserPayload, @Body() body: { realName: string; idCard: string }) {
+    if (!body || typeof body !== 'object') throw Err.param('请填写实名信息');
     await this.features.assertEnabled('realname', 'h5', current.rankLevel);
     return this.users.realname(current.id, body.realName, body.idCard);
   }
@@ -139,8 +150,19 @@ export class MemberController {
     @CurrentUser() current: CurrentUserPayload,
     @Body() body: { currentPassword?: string; newPassword: string },
   ) {
+    if (!body || typeof body !== 'object') throw Err.param('请填写支付密码');
     await this.features.assertEnabled('transfer.password', 'h5', current.rankLevel);
     return this.users.setTransferPassword(current.id, body.currentPassword, body.newPassword);
+  }
+
+  @Post('me/transfer-password/reset')
+  async resetTransferPassword(
+    @CurrentUser() current: CurrentUserPayload,
+    @Body() body: { realName: string; idCard: string; newPassword: string },
+  ) {
+    if (!body || typeof body !== 'object') throw Err.param('请填写实名信息与新支付密码');
+    await this.features.assertEnabled('transfer.password', 'h5', current.rankLevel);
+    return this.users.resetTransferPassword(current.id, body.realName, body.idCard, body.newPassword);
   }
 
   @Get('me/team')
@@ -194,21 +216,35 @@ export class MemberController {
     return this.walletSvc.transactions(current.id, Number(page));
   }
 
+  @Get('me/transfer-quota')
+  async transferQuotaAccount(@CurrentUser() current: CurrentUserPayload) {
+    await this.features.assertEnabled('wallet.transfer_quota', 'h5', current.rankLevel);
+    return this.transferQuota.getAccount(current.id);
+  }
+
+  @Get('me/transfer-quota/transactions')
+  async transferQuotaTransactions(@CurrentUser() current: CurrentUserPayload, @Query('page') page = '1') {
+    await this.features.assertEnabled('wallet.transfer_quota', 'h5', current.rankLevel);
+    return this.transferQuota.transactions(current.id, Number(page));
+  }
+
   @Post('me/wallet/transfers')
   async walletTransfer(
     @CurrentUser() current: CurrentUserPayload,
-    @Body() body: { toPhone: string; amount: number; paymentPassword: string; remark?: string },
+    @Body() body: { toPhone: string; amount: number | string; paymentPassword: string; remark?: string },
+    @Headers('x-idempotency-key') idempotencyKey?: string,
   ) {
+    if (!body || typeof body !== 'object') throw Err.param('转账参数缺失');
     await this.features.assertEnabled('wallet.account', 'h5', current.rankLevel);
     await this.features.assertEnabled('transfer.password', 'h5', current.rankLevel);
-    return this.transfer.createWalletTransfer(current.id, body.toPhone, BigInt(body.amount), body.paymentPassword, body.remark);
+    return this.transfer.createWalletTransfer(current.id, body.toPhone, this.parsePositiveAmount(body.amount), body.paymentPassword, body.remark, 'h5', current.rankLevel, idempotencyKey);
   }
 
   @Post('me/wallet/transfers/:id/accept')
   async acceptWalletTransfer(@Param('id') id: string, @CurrentUser() current: CurrentUserPayload) {
     await this.features.assertEnabled('wallet.account', 'h5', current.rankLevel);
     await this.features.assertEnabled('wallet.transfer', 'h5', current.rankLevel);
-    return this.transfer.acceptWalletTransfer(BigInt(id), current.id);
+    return this.transfer.acceptWalletTransfer(this.parseId(id, '转账编号'), current.id);
   }
 
   @Get('me/equity')
@@ -226,18 +262,20 @@ export class MemberController {
   @Post('me/equity/transfers')
   async equityTransfer(
     @CurrentUser() current: CurrentUserPayload,
-    @Body() body: { toPhone: string; amount: number; paymentPassword: string; remark?: string },
+    @Body() body: { toPhone: string; amount: number | string; paymentPassword: string; remark?: string },
+    @Headers('x-idempotency-key') idempotencyKey?: string,
   ) {
+    if (!body || typeof body !== 'object') throw Err.param('转账参数缺失');
     await this.features.assertEnabled('equity.account', 'h5', current.rankLevel);
     await this.features.assertEnabled('transfer.password', 'h5', current.rankLevel);
-    return this.transfer.createEquityTransfer(current.id, body.toPhone, BigInt(body.amount), body.paymentPassword, body.remark);
+    return this.transfer.createEquityTransfer(current.id, body.toPhone, this.parsePositiveAmount(body.amount), body.paymentPassword, body.remark, 'h5', current.rankLevel, idempotencyKey);
   }
 
   @Post('me/equity/transfers/:id/accept')
   async acceptEquityTransfer(@Param('id') id: string, @CurrentUser() current: CurrentUserPayload) {
     await this.features.assertEnabled('equity.account', 'h5', current.rankLevel);
     await this.features.assertEnabled('equity.transfer', 'h5', current.rankLevel);
-    return this.transfer.acceptEquityTransfer(BigInt(id), current.id);
+    return this.transfer.acceptEquityTransfer(this.parseId(id, '转账编号'), current.id);
   }
 
   @Get('me/transfers/:platform')
@@ -253,6 +291,17 @@ export class MemberController {
       current.rankLevel,
     );
     return this.transfer.listTransfers(current.id, platform, Number(page));
+  }
+
+  private parsePositiveAmount(value: unknown): bigint {
+    if (typeof value === 'number') {
+      if (!Number.isSafeInteger(value) || value <= 0) throw Err.param('金额必须为安全范围内的正整数');
+      return BigInt(value);
+    }
+    if (typeof value !== 'string' || !/^\d{1,18}$/.test(value) || BigInt(value) <= 0n) {
+      throw Err.param('金额必须为 1 至 18 位正整数');
+    }
+    return BigInt(value);
   }
 
   private parseId(value: string, label: string): bigint {
@@ -275,11 +324,13 @@ export class MemberController {
   @Post('me/token/transfers')
   async tokenTransfer(
     @CurrentUser() current: CurrentUserPayload,
-    @Body() body: { toPhone: string; amount: number; paymentPassword: string; remark?: string },
+    @Body() body: { toPhone: string; amount: number | string; paymentPassword: string; remark?: string },
+    @Headers('x-idempotency-key') idempotencyKey?: string,
   ) {
+    if (!body || typeof body !== 'object') throw Err.param('转账参数缺失');
     await this.features.assertEnabled('token.view', 'h5', current.rankLevel);
     await this.features.assertEnabled('transfer.password', 'h5', current.rankLevel);
-    return this.transfer.createTokenTransfer(current.id, body.toPhone, BigInt(body.amount), body.paymentPassword, body.remark);
+    return this.transfer.createTokenTransfer(current.id, body.toPhone, this.parsePositiveAmount(body.amount), body.paymentPassword, body.remark, 'h5', current.rankLevel, idempotencyKey);
   }
 
   @Get('referral/qrcode')
@@ -287,10 +338,22 @@ export class MemberController {
     const id = current.id;
     await this.features.assertEnabled('referral.center', 'h5', current.rankLevel);
     const user = await this.prisma.user.findUnique({ where: { id }, select: { inviteCode: true } });
+    const inviteCode = user?.inviteCode ?? '';
+    const h5BaseUrl = (process.env.H5_BASE_URL ?? 'http://localhost:5173').replace(/\/+$/, '');
+    const url = `${h5BaseUrl}/#/register?code=${encodeURIComponent(inviteCode)}`;
+    const [poster, qrCode] = await Promise.all([
+      this.config.get<ReferralPosterTemplate>('referral.poster', DEFAULT_REFERRAL_POSTER_TEMPLATE),
+      QRCode.toDataURL(url, {
+        errorCorrectionLevel: 'H', margin: 1, width: 768,
+        color: { dark: '#111826', light: '#FFFFFFFF' },
+      }),
+    ]);
     return {
-      inviteCode: user?.inviteCode,
-      url: `${process.env.H5_BASE_URL ?? 'http://localhost:5173'}/#/register?code=${user?.inviteCode}`,
+      inviteCode,
+      url,
       slogan: '扫码加入，共享成长',
+      poster,
+      qrCode,
     };
   }
 }

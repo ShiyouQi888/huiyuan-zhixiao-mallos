@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { BusinessException, Err } from '../common/business.exception';
 import { ConfigService } from '../config/config.service';
 import { EquityService } from '../equity/equity.service';
@@ -7,8 +9,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from '../token/token.service';
 import { WalletService } from '../wallet/wallet.service';
 import { UserService } from '../user/user.service';
+import { TransferQuotaService } from '../transfer-quota/transfer-quota.service';
+import { idempotencyScene, requireIdempotencyKey } from '../common/idempotency';
 
-/** 会员间转账：钱包余额 / 权益值（需接收方 24h 内确认）、数权（即时到账） */
+/** 会员间转账：钱包余额（需接收方 24h 内确认）与太阳值（即时到账） */
 @Injectable()
 export class TransferService {
   constructor(
@@ -19,9 +23,11 @@ export class TransferService {
     private readonly features: FeaturesService,
     private readonly config: ConfigService,
     private readonly users: UserService,
+    private readonly transferQuota: TransferQuotaService,
   ) {}
 
   private async parties(fromId: bigint, toPhone: string) {
+    if (!/^1[3-9]\d{9}$/.test(toPhone ?? '')) throw Err.param('收款人手机号格式不正确');
     const from = await this.prisma.user.findUnique({ where: { id: fromId } });
     const to = await this.prisma.user.findUnique({ where: { phone: toPhone } });
     if (!from || !to) throw Err.notFound('转账双方账号不存在');
@@ -87,7 +93,7 @@ export class TransferService {
     if (scene === 'token') {
       const limit = BigInt(await this.config.getNumber('token.transfer_limit', 0));
       if (limit > 0n && amount > limit) throw Err.param(`单笔转账不得超过 ${limit}`);
-      if (!(await this.config.get<boolean>('token.transfer_enabled', true))) throw Err.featureDisabled('数权转账功能已关闭');
+      if (!(await this.config.get<boolean>('token.transfer_enabled', true))) throw Err.featureDisabled('太阳值转账功能已关闭');
       return;
     }
     const limit = BigInt(await this.config.getNumber('transfer.limit', 0));
@@ -95,47 +101,87 @@ export class TransferService {
     if (!(await this.config.get<boolean>('transfer.enabled', true))) throw Err.featureDisabled('转账功能已关闭');
   }
 
+  private normalizeRemark(remark?: string): string | undefined {
+    if (remark === undefined) return undefined;
+    if (typeof remark !== 'string') throw Err.param('转账备注格式不正确');
+    const normalized = remark.trim();
+    if (normalized.length > 255) throw Err.param('转账备注不能超过 255 个字符');
+    return normalized || undefined;
+  }
+
   /* ---------------- 钱包余额转账 ---------------- */
 
-  async createWalletTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string) {
-    await this.features.assertEnabled('wallet.transfer');
+  async createWalletTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string, platform: 'h5' | 'app' = 'h5', rankLevel = 0, rawIdempotencyKey?: string) {
+    await this.features.assertEnabled('wallet.transfer', platform, rankLevel);
+    remark = this.normalizeRemark(remark);
+    const idempotencyKey = requireIdempotencyKey(rawIdempotencyKey);
+    const scene = idempotencyScene('wallet.transfer', { fromId, toPhone, amount, remark });
     await this.users.verifyTransferPassword(fromId, paymentPassword);
     await this.checkAmount(amount);
     const { from, to } = await this.parties(fromId, toPhone);
     const riskFlag = await this.checkRisk(from, to, amount, 'wallet');
 
-    const transferNo = `W${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
-    await this.wallet.freeze(fromId, amount, transferNo);
-    const transfer = await this.prisma.walletTransfer.create({
-      data: { transferNo, fromUserId: fromId, toUserId: to.id, amount, riskFlag, remark },
-    });
-    return { transferNo: transfer.transferNo, status: transfer.status, riskFlag };
+    const transferNo = `W${randomUUID().replace(/-/g, '').slice(0, 31).toUpperCase()}`;
+    const run = async (tx: Prisma.TransactionClient) => {
+      const previous = await tx.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
+      if (previous && previous.expireAt > new Date()) {
+        if (previous.scene !== scene) throw Err.conflict('该请求幂等键已用于其他转账内容，请重新提交');
+        const transferNo = (previous.result as { transferNo?: string } | null)?.transferNo;
+        if (!transferNo) throw Err.conflict('转账请求正在处理中，请稍后刷新流水');
+        const priorTransfer = await tx.walletTransfer.findUniqueOrThrow({ where: { transferNo } });
+        return { transferNo: priorTransfer.transferNo, status: priorTransfer.status, riskFlag: priorTransfer.riskFlag };
+      }
+      if (previous) await tx.idempotencyKey.delete({ where: { key: idempotencyKey } });
+      await tx.idempotencyKey.create({ data: { key: idempotencyKey, scene, expireAt: new Date(Date.now() + 86400_000) } });
+      await this.wallet.freeze(fromId, amount, transferNo, tx);
+      await this.transferQuota.reserve(fromId, amount, transferNo, tx);
+      const transfer = await tx.walletTransfer.create({
+        data: { transferNo, fromUserId: fromId, toUserId: to.id, amount, riskFlag, remark },
+      });
+      await tx.idempotencyKey.update({ where: { key: idempotencyKey }, data: { result: { transferNo: transfer.transferNo } } });
+      return { transferNo: transfer.transferNo, status: transfer.status, riskFlag };
+    };
+    try {
+      return await this.prisma.$transaction(run);
+    } catch (error) {
+      if ((error as { code?: string })?.code !== 'P2002') throw error;
+      const previous = await this.prisma.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
+      if (!previous || previous.scene !== scene) throw error;
+      const priorNo = (previous.result as { transferNo?: string } | null)?.transferNo;
+      if (!priorNo) throw Err.conflict('转账请求正在处理中，请稍后刷新流水');
+      const priorTransfer = await this.prisma.walletTransfer.findUniqueOrThrow({ where: { transferNo: priorNo } });
+      return { transferNo: priorTransfer.transferNo, status: priorTransfer.status, riskFlag: priorTransfer.riskFlag };
+    }
   }
 
   async acceptWalletTransfer(transferId: bigint, userId: bigint, reviewedByAdmin = false) {
-    const t = await this.prisma.walletTransfer.findUnique({ where: { id: transferId } });
-    if (!t) throw Err.notFound('转账记录不存在');
-    if (t.toUserId !== userId) throw Err.forbidden('只有接收方可以确认');
-    if (t.status !== 'PENDING') throw Err.conflict('该转账已处理');
-    if (t.riskFlag === 1 && !reviewedByAdmin) throw Err.risk('该转账正在人工审核中');
-
-    await this.wallet.confirmTransfer(t.fromUserId, t.toUserId, t.amount, t.transferNo);
-    return this.prisma.walletTransfer.update({
-      where: { id: t.id },
-      data: { status: 'COMPLETED', completedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const t = await tx.walletTransfer.findUnique({ where: { id: transferId } });
+      if (!t) throw Err.notFound('转账记录不存在');
+      if (t.toUserId !== userId) throw Err.forbidden('只有接收方可以确认');
+      if (t.status !== 'PENDING') throw Err.conflict('该转账已处理');
+      if (t.riskFlag === 1 && !reviewedByAdmin) throw Err.risk('该转账正在人工审核中');
+      const marked = await tx.walletTransfer.updateMany({
+        where: { id: t.id, status: 'PENDING' }, data: { status: 'COMPLETED', completedAt: new Date() },
+      });
+      if (!marked.count) throw Err.conflict('该转账已处理');
+      await this.wallet.confirmTransfer(t.fromUserId, t.toUserId, t.amount, t.transferNo, tx);
+      await this.transferQuota.consumeReserved(t.fromUserId, t.amount, t.transferNo, tx);
+      return tx.walletTransfer.findUniqueOrThrow({ where: { id: t.id } });
     });
   }
 
   /* ---------------- 权益值转账 ---------------- */
 
-  async createEquityTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string) {
-    await this.features.assertEnabled('equity.transfer');
+  async createEquityTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string, platform: 'h5' | 'app' = 'h5', rankLevel = 0, _rawIdempotencyKey?: string) {
+    await this.features.assertEnabled('equity.transfer', platform, rankLevel);
+    remark = this.normalizeRemark(remark);
     await this.users.verifyTransferPassword(fromId, paymentPassword);
     await this.checkAmount(amount);
     const { from, to } = await this.parties(fromId, toPhone);
     const riskFlag = await this.checkRisk(from, to, amount, 'equity');
 
-    const transferNo = `E${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
+    const transferNo = `E${randomUUID().replace(/-/g, '').slice(0, 31).toUpperCase()}`;
     const { usages, earliestExpireAt } = await this.equity.transferOut(fromId, to.id, amount, transferNo);
     await this.equity.markTransferOut(fromId, amount);
 
@@ -173,39 +219,65 @@ export class TransferService {
     return { transferNo: t.transferNo, status: 'COMPLETED' };
   }
 
-  /* ---------------- 数权转账（即时到账） ---------------- */
+  /* ---------------- 太阳值转账（即时到账） ---------------- */
 
-  async createTokenTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string) {
-    await this.features.assertEnabled('token.transfer');
+  async createTokenTransfer(fromId: bigint, toPhone: string, amount: bigint, paymentPassword: string, remark?: string, platform: 'h5' | 'app' = 'h5', rankLevel = 0, rawIdempotencyKey?: string) {
+    await this.features.assertEnabled('token.transfer', platform, rankLevel);
+    remark = this.normalizeRemark(remark);
+    const idempotencyKey = requireIdempotencyKey(rawIdempotencyKey);
+    const scene = idempotencyScene('token.transfer', { fromId, toPhone, amount, remark });
     await this.users.verifyTransferPassword(fromId, paymentPassword);
     await this.checkAmount(amount, 'token');
     const { from, to } = await this.parties(fromId, toPhone);
     const riskFlag = await this.checkRisk(from, to, amount, 'token');
 
-    const transferNo = `T${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
-    await this.token.transfer(fromId, to.id, amount, transferNo);
-    const transfer = await this.prisma.tokenTransfer.create({
-      data: {
-        transferNo,
-        fromUserId: fromId,
-        toUserId: to.id,
-        amount,
-        riskFlag,
-        remark,
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
-    });
-    return { transferNo: transfer.transferNo, status: transfer.status, riskFlag };
+    const transferNo = `T${randomUUID().replace(/-/g, '').slice(0, 31).toUpperCase()}`;
+    const run = async (tx: Prisma.TransactionClient) => {
+      const previous = await tx.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
+      if (previous && previous.expireAt > new Date()) {
+        if (previous.scene !== scene) throw Err.conflict('该请求幂等键已用于其他转账内容，请重新提交');
+        const priorNo = (previous.result as { transferNo?: string } | null)?.transferNo;
+        if (!priorNo) throw Err.conflict('转账请求正在处理中，请稍后刷新流水');
+        const priorTransfer = await tx.tokenTransfer.findUniqueOrThrow({ where: { transferNo: priorNo } });
+        return { transferNo: priorTransfer.transferNo, status: priorTransfer.status, riskFlag: priorTransfer.riskFlag };
+      }
+      if (previous) await tx.idempotencyKey.delete({ where: { key: idempotencyKey } });
+      await tx.idempotencyKey.create({ data: { key: idempotencyKey, scene, expireAt: new Date(Date.now() + 86400_000) } });
+      await this.token.transfer(fromId, to.id, amount, transferNo, tx);
+      const transfer = await tx.tokenTransfer.create({
+        data: {
+          transferNo, fromUserId: fromId, toUserId: to.id, amount, riskFlag, remark,
+          status: 'COMPLETED', completedAt: new Date(),
+        },
+      });
+      await tx.idempotencyKey.update({ where: { key: idempotencyKey }, data: { result: { transferNo: transfer.transferNo } } });
+      return { transferNo: transfer.transferNo, status: transfer.status, riskFlag };
+    };
+    try {
+      return await this.prisma.$transaction(run);
+    } catch (error) {
+      if ((error as { code?: string })?.code !== 'P2002') throw error;
+      const previous = await this.prisma.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
+      if (!previous || previous.scene !== scene) throw error;
+      const priorNo = (previous.result as { transferNo?: string } | null)?.transferNo;
+      if (!priorNo) throw Err.conflict('转账请求正在处理中，请稍后刷新流水');
+      const priorTransfer = await this.prisma.tokenTransfer.findUniqueOrThrow({ where: { transferNo: priorNo } });
+      return { transferNo: priorTransfer.transferNo, status: priorTransfer.status, riskFlag: priorTransfer.riskFlag };
+    }
   }
 
   /** 拒绝转账（转出方或管理员） */
   async rejectWalletTransfer(transferId: bigint, userId: bigint) {
-    const t = await this.prisma.walletTransfer.findUnique({ where: { id: transferId } });
-    if (!t || (t.fromUserId !== userId && t.toUserId !== userId)) throw Err.notFound('转账记录不存在');
-    if (t.status !== 'PENDING') throw Err.conflict('该转账已处理');
-    await this.wallet.unfreeze(t.fromUserId, t.amount, t.transferNo);
-    return this.prisma.walletTransfer.update({ where: { id: t.id }, data: { status: 'REJECTED' } });
+    return this.prisma.$transaction(async (tx) => {
+      const t = await tx.walletTransfer.findUnique({ where: { id: transferId } });
+      if (!t || (t.fromUserId !== userId && t.toUserId !== userId)) throw Err.notFound('转账记录不存在');
+      if (t.status !== 'PENDING') throw Err.conflict('该转账已处理');
+      const marked = await tx.walletTransfer.updateMany({ where: { id: t.id, status: 'PENDING' }, data: { status: 'REJECTED' } });
+      if (!marked.count) throw Err.conflict('该转账已处理');
+      await this.wallet.unfreeze(t.fromUserId, t.amount, t.transferNo, tx);
+      await this.transferQuota.release(t.fromUserId, t.amount, t.transferNo, tx);
+      return tx.walletTransfer.findUniqueOrThrow({ where: { id: t.id } });
+    });
   }
 
   async rejectEquityTransfer(transferId: bigint, userId: bigint) {
@@ -231,9 +303,14 @@ export class TransferService {
       where: { status: 'PENDING', createdAt: { lt: cutoff } },
     });
     for (const t of walletPending) {
-      await this.wallet.unfreeze(t.fromUserId, t.amount, t.transferNo);
-      await this.prisma.walletTransfer.update({ where: { id: t.id }, data: { status: 'EXPIRED' } });
-      count++;
+      const expired = await this.prisma.$transaction(async (tx) => {
+        const marked = await tx.walletTransfer.updateMany({ where: { id: t.id, status: 'PENDING' }, data: { status: 'EXPIRED' } });
+        if (!marked.count) return false;
+        await this.wallet.unfreeze(t.fromUserId, t.amount, t.transferNo, tx);
+        await this.transferQuota.release(t.fromUserId, t.amount, t.transferNo, tx);
+        return true;
+      });
+      if (expired) count++;
     }
 
     const equityPending = await this.prisma.equityTransfer.findMany({

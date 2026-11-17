@@ -12,6 +12,8 @@ const ACTION_NAMES: Record<string, string> = {
   WALLET_ADJUST: '钱包调整', EQUITY_ADJUST: '权益值调整', BONUS_ADJUST: '奖金调整',
   PEER_LOCK: '平级奖锁定', REBIND: '关系换绑', RANK_MANUAL: '手工调级',
   ORDER_DELIVER: '订单交付', TRANSFER_REVIEW: '转账审核', CONFIG_UPDATE: '配置修改',
+  SYSTEM_RECONCILIATION_ALERT: '系统对账异常', SYSTEM_SETTLEMENT_ALERT: '日结异常',
+  SYSTEM_RECONCILIATION_RESOLVED: '对账异常已恢复',
 };
 
 export function Audit() {

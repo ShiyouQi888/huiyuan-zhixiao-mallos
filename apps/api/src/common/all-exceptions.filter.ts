@@ -35,6 +35,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
       code = 3002;
       message = exception.code === 'P2002' ? '数据已存在，请勿重复提交' : '数据操作失败';
       status = HttpStatus.BAD_REQUEST;
+    } else if (
+      exception && typeof exception === 'object' && 'code' in exception
+      && (exception as { code?: string }).code === 'LIMIT_FILE_SIZE'
+    ) {
+      code = 1001;
+      message = '文件大小不能超过 10MB';
+      status = HttpStatus.BAD_REQUEST;
     } else {
       this.logger.error(`[${traceId}] ${req.method} ${req.url}`, exception as Error);
     }

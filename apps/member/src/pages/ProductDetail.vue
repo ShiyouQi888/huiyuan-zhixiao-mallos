@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, money, post, resolveAssetUrl } from '../api';
+import { useUserStore } from '../stores/user';
 import { Toast } from './_toast';
 import EmptyState from '../components/EmptyState.vue';
 import AppModal from '../components/AppModal.vue';
@@ -9,12 +10,12 @@ import { BadgeCheck, ChevronLeft, CircleDollarSign, Minus, Package, Plus, Tags, 
 
 const route = useRoute();
 const router = useRouter();
+const store = useUserStore();
 const product = ref<any>(null);
 const selectedImageIndex = ref(0);
 const quantity = ref(1);
 const loading = ref(true);
 const buying = ref(false);
-const equityModal = ref(false);
 const checkoutOpen = ref(false);
 const addresses = ref<any[]>([]);
 const selectedAddressId = ref('');
@@ -28,6 +29,10 @@ const stock = computed(() => Math.max(0, Number(product.value?.stock ?? 0)));
 const canBuy = computed(() => stock.value > 0 && quantity.value <= stock.value && !buying.value);
 const hasMemberPrice = computed(() => Boolean(product.value) && unitPrice.value < Number(product.value?.price ?? 0));
 const selectedAddress = computed(() => addresses.value.find((address) => String(address.id) === selectedAddressId.value) ?? null);
+const availableQuota = computed(() => Math.max(0, Number(store.profile?.transferQuotaAccount?.available ?? 0)));
+const quotaSpend = computed(() => totalPrice.value);
+const quotaAfterSpend = computed(() => Math.max(0, availableQuota.value - quotaSpend.value));
+const quotaExceedsAvailable = computed(() => Boolean(store.profile?.packageId) && quotaSpend.value > availableQuota.value);
 
 onMounted(async () => {
   loading.value = true;
@@ -44,6 +49,7 @@ onMounted(async () => {
 
 async function beginCheckout() {
   if (!product.value || !canBuy.value) return;
+  await store.loadProfile().catch(() => {});
   try {
     addresses.value = await api<any[]>('/me/addresses');
   } catch (e: any) {
@@ -68,16 +74,16 @@ async function buy() {
       productId: Number(product.value.id),
       addressId: selectedAddressId.value,
       quantity: quantity.value,
-      useEquity: true,
       useBalance: true,
     });
+    await store.loadProfile().catch(() => {});
     Toast('下单成功', 'success');
     checkoutOpen.value = false;
     router.push('/orders');
   } catch (e: any) {
     const message = e.message ?? '下单失败，请稍后重试';
-    if (/权益值.*不足/.test(message)) {
-      equityModal.value = true;
+    if (/钱包可用余额不足|现金支付/.test(message)) {
+      Toast('钱包可用余额不足，当前订单无法完成支付。', 'warning');
     } else {
       Toast(message, 'danger');
     }
@@ -145,8 +151,8 @@ async function buy() {
           <div><strong>{{ product.category?.name ?? '精选商品' }}</strong><span>所属分类</span></div>
         </div>
         <div class="detail-service">
-          <span><CircleDollarSign :size="13" aria-hidden="true" />支持权益值抵扣</span>
-          <span><Wallet :size="13" aria-hidden="true" />支持余额支付</span>
+          <span><CircleDollarSign :size="13" aria-hidden="true" />钱包余额支付</span>
+          <span><Wallet :size="13" aria-hidden="true" />钱包消费扣减权益通</span>
           <span v-if="hasMemberPrice"><BadgeCheck :size="13" aria-hidden="true" />会员专属价格</span>
         </div>
       </section>
@@ -174,17 +180,11 @@ async function buy() {
       </div>
     </template>
 
-    <AppModal v-model="equityModal" eyebrow="下单提示" title="权益值余额不足" alert
-      description="本单需使用权益值抵扣，当前账户可用权益值不足。"
-      hint="确认后将前往资产中心。" confirm-text="确认"
-      @confirm="equityModal = false; router.push('/assets')">
-      <div class="app-modal-note">可前往资产中心查看权益值明细，或购买会员礼包补充权益值后再下单。</div>
-    </AppModal>
     <AppModal v-model="checkoutOpen" eyebrow="确认订单" title="确认配送信息"
       description="下单后会保存当前地址快照，用于本笔订单配送。"
-      :confirm-loading="buying" :confirm-disabled="!selectedAddress || !canBuy"
+      :confirm-loading="buying" :confirm-disabled="!selectedAddress || !canBuy || quotaExceedsAvailable"
       :confirm-text="buying ? '提交中…' : `提交订单 · ¥${money(totalPrice)}`"
-      hint="确认收货信息与商品数量后提交订单。" @confirm="buy">
+      :hint="quotaExceedsAvailable ? '商品金额超过当前可用权益通，请减少购买数量或完成复消后再下单。' : '商品订单会按实际钱包扣款消耗权益通，订单金额不能超过当前可用额度。会员卡订单不消耗权益通。'" @confirm="buy">
       <label class="app-field"><span>选择收货地址</span>
         <select v-model="selectedAddressId" class="input">
           <option v-for="address in addresses" :key="address.id" :value="String(address.id)">
@@ -195,6 +195,12 @@ async function buy() {
       <div v-if="selectedAddress" class="checkout-address-card">
         <div><strong>{{ selectedAddress.receiver }}</strong><span>{{ selectedAddress.phone }}</span></div>
         <p>{{ selectedAddress.province }}{{ selectedAddress.city }}{{ selectedAddress.district }}{{ selectedAddress.detail }}</p>
+      </div>
+      <div v-if="store.profile?.packageId && store.profile?.transferQuotaAccount" class="checkout-quota-summary">
+        <div><span>预计消耗权益通</span><strong>{{ money(quotaSpend) }}</strong></div>
+        <div><span>当前剩余</span><strong>{{ money(availableQuota) }}</strong></div>
+        <div><span>支付后预计剩余</span><strong>{{ money(quotaAfterSpend) }}</strong></div>
+        <p v-if="quotaExceedsAvailable" class="checkout-quota-summary__warning">订单金额超过可用权益通 {{ money(quotaSpend - availableQuota) }}，请减少购买数量或完成复消后再下单。</p>
       </div>
       <button type="button" class="checkout-address-manage" @click="checkoutOpen = false; router.push('/addresses')">管理收货地址</button>
     </AppModal>
@@ -212,6 +218,12 @@ async function buy() {
 .checkout-address-card > div { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 12px; }
 .checkout-address-card span { color: var(--muted); }
 .checkout-address-card p { margin: 7px 0 0; color: var(--text-2); font-size: 11px; line-height: 1.6; }
+.checkout-quota-summary { display: grid; gap: 7px; margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.checkout-quota-summary > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.checkout-quota-summary strong { color: var(--text); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.checkout-quota-summary > div:last-child strong { color: var(--brand); }
+.checkout-quota-summary p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.checkout-quota-summary__warning { color: var(--danger, #dc2626) !important; }
 .checkout-address-manage { display: inline-flex; margin-top: 10px; padding: 4px 0; border: 0; background: transparent; color: var(--brand); font: inherit; font-size: 11px; cursor: pointer; }
 @media (max-width: 390px) {
   .detail-purchase-bar { grid-template-columns: minmax(0, 1fr) 100px; gap: 8px; }

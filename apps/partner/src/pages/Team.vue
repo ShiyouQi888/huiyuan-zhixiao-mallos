@@ -63,8 +63,8 @@ function initial(value: unknown): string {
         </template>
         <template #trailing>
           <StatusTag tone="brand">Lv.{{ m.rankLevel }}</StatusTag>
-          <StatusTag :tone="m.equityStatus === 1 ? 'danger' : 'green'">
-            {{ m.equityStatus === 1 ? '暂停计酬' : '正常' }}
+          <StatusTag :tone="m.transferQuotaStatus === 1 ? 'warning' : 'green'">
+            {{ m.transferQuotaStatus === 1 ? '权益通已用完' : '权益通可用' }}
           </StatusTag>
         </template>
       </ListRow>

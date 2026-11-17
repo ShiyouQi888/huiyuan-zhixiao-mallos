@@ -17,7 +17,7 @@ const error = ref('');
 const loading = ref(false);
 const nicknameValid = computed(() => nickname.value.trim().length >= 2 && nickname.value.trim().length <= 64);
 const phoneValid = computed(() => /^1[3-9]\d{9}$/.test(phone.value));
-const passwordValid = computed(() => password.value.length >= 6 && password.value.length <= 64);
+const passwordValid = computed(() => password.value.length >= 8 && password.value.length <= 64);
 const inviteCodeValid = computed(() => inviteCode.value.length <= 32);
 const formValid = computed(() => nicknameValid.value && phoneValid.value && passwordValid.value && inviteCodeValid.value);
 
@@ -75,7 +75,7 @@ async function submit() {
       <label class="auth-field">
         <span>登录密码</span>
         <t-input v-model="password" type="password" maxlength="64" autocomplete="new-password"
-          placeholder="请设置至少 6 位密码" aria-label="登录密码" @input="error = ''" />
+          placeholder="请设置 8–64 位密码" aria-label="登录密码" @input="error = ''" />
       </label>
       <label class="auth-field auth-invite-field">
         <span>邀请码<span class="auth-optional">选填</span></span>

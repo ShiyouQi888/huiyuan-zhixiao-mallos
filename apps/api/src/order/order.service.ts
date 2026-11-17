@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { BusinessException, Err } from '../common/business.exception';
 import { ConfigService } from '../config/config.service';
-import { EquityService } from '../equity/equity.service';
-import { PACKAGE_SEEDS } from '@solar/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { TransferQuotaService } from '../transfer-quota/transfer-quota.service';
 import { WalletService } from '../wallet/wallet.service';
+import { idempotencyScene, requireIdempotencyKey } from '../common/idempotency';
 
 export interface CreateOrderParams {
   userId: bigint;
@@ -13,7 +15,6 @@ export interface CreateOrderParams {
   productId?: bigint;
   addressId?: bigint;
   quantity?: number;
-  useEquity?: boolean;
   useBalance?: boolean;
   remark?: string;
 }
@@ -23,7 +24,7 @@ export interface CreateOrderParams {
 export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly equity: EquityService,
+    private readonly transferQuota: TransferQuotaService,
     private readonly wallet: WalletService,
     private readonly config: ConfigService,
   ) {}
@@ -31,13 +32,26 @@ export class OrderService {
   private orderNo(): string {
     const d = new Date();
     const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    return `${date}${Math.floor(Math.random() * 900000 + 100000)}`;
+    return `${date}${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
   }
 
-  /** 下单：权益值为「转账/可转出额度」，不参与消费抵扣；仅钱包余额抵扣。 */
-  async create(params: CreateOrderParams) {
+  /** 订单由钱包余额支付；商品消费会扣减权益通，礼包订单仅发放权益通。 */
+  async create(params: CreateOrderParams, rawIdempotencyKey?: string) {
+    const idempotencyKey = requireIdempotencyKey(rawIdempotencyKey);
+    const scene = idempotencyScene('order.create', params);
     const no = this.orderNo();
-    return this.prisma.$transaction(async (tx) => {
+    const createInTransaction = async (tx: Prisma.TransactionClient) => {
+      const previous = await tx.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
+      if (previous && previous.expireAt > new Date()) {
+        if (previous.scene !== scene) throw Err.conflict('该请求幂等键已用于其他订单内容，请重新提交');
+        const orderNo = (previous.result as { orderNo?: string } | null)?.orderNo;
+        if (!orderNo) throw Err.conflict('订单请求正在处理中，请稍后刷新订单列表');
+        return tx.order.findUniqueOrThrow({ where: { orderNo } });
+      }
+      if (previous) await tx.idempotencyKey.delete({ where: { key: idempotencyKey } });
+      await tx.idempotencyKey.create({
+        data: { key: idempotencyKey, scene, expireAt: new Date(Date.now() + 24 * 60 * 60_000) },
+      });
       const user = await tx.user.findUnique({ where: { id: params.userId } });
       if (!user || user.role !== 'MEMBER' || user.status !== 0) throw Err.notFound('会员不存在或账号不可用');
       let rewardParentId = user.parentId;
@@ -47,7 +61,7 @@ export class OrderService {
       }
 
       let amount = 0n;
-      let packageRow: { id: number; level: number; price: bigint; equityValue: bigint; durationDays: number } | null = null;
+      let packageRow: { id: number; level: number; price: bigint; transferQuota: bigint; durationDays: number } | null = null;
       let shippingAddress: { receiver: string; phone: string; province: string; city: string; district: string; detail: string } | null = null;
       let productName: string | null = null;
       const quantity = Number(params.quantity ?? 1);
@@ -67,7 +81,8 @@ export class OrderService {
           amount = pkg.price - currentPackage.price;
         } else {
           if (user.packageId === null) throw Err.conflict('尚未购买礼包的会员不能复消');
-          if (user.equityStatus !== 1) throw Err.conflict('权益值尚未用完，当前不能复消');
+          const quota = await tx.transferQuotaAccount.findUnique({ where: { userId: params.userId } });
+          if (quota && quota.granted - quota.adjustedOut > quota.used) throw Err.conflict('权益通尚未用完，当前不能复消');
           amount = pkg.price;
         }
       } else if (params.type === 4) {
@@ -99,35 +114,26 @@ export class OrderService {
         throw Err.param('订单类型不合法');
       }
 
-      // 权益值为可消费/可转出的额度：下单先按 FIFO 抵扣权益值，再用钱包余额
-      let equityDeduct = 0n;
       let balanceDeduct = 0n;
-      if (params.useEquity !== false) {
-        const [account, activeLots] = await Promise.all([
-          tx.equityAccount.findUnique({ where: { userId: params.userId } }),
-          tx.equityLot.aggregate({ where: { userId: params.userId, status: 'ACTIVE', remaining: { gt: 0n } }, _sum: { remaining: true } }),
-        ]);
-        const lotBalance = activeLots._sum.remaining ?? 0n;
-        const accountBalance = account?.balance ?? 0n;
-        const usableEquity = lotBalance < accountBalance ? lotBalance : accountBalance;
-        equityDeduct = usableEquity < amount ? usableEquity : amount;
-        if (equityDeduct > 0n) {
-          await this.equity.deductFIFO(params.userId, equityDeduct, 'order_equity', no, 2, tx);
-          // 额度因消费归零同样视为「用完」，标记暂停计酬（等待复消恢复）
-          await this.equity.markSuspendIfExhausted(params.userId, tx);
-        }
-      }
-
-      const rest = amount - equityDeduct;
-      if (rest > 0n && params.useBalance !== false) {
+      if (params.useBalance !== false) {
         const account = await this.wallet.get(params.userId, tx);
         const available = account.balance - account.frozen;
-        balanceDeduct = available < rest ? available : rest;
+        balanceDeduct = available < amount ? available : amount;
+        if (params.type === 4 && user.packageId !== null && balanceDeduct > 0n) {
+          const quota = await tx.transferQuotaAccount.findUnique({ where: { userId: params.userId } });
+          const quotaAvailable = quota
+            ? quota.granted - quota.adjustedOut - quota.used - quota.reserved
+            : 0n;
+          const safeQuotaAvailable = quotaAvailable > 0n ? quotaAvailable : 0n;
+          if (balanceDeduct > safeQuotaAvailable) {
+            throw Err.conflict(`本次钱包消费将超过可用权益通，当前可用 ${safeQuotaAvailable.toLocaleString('zh-CN')} 元，请减少购买金额或完成复消后再下单`);
+          }
+        }
         if (balanceDeduct > 0n) await this.wallet.debit(params.userId, balanceDeduct, 'order_balance', no, `订单 ${no} 余额抵扣`, tx);
       }
-      const cashPay = amount - equityDeduct - balanceDeduct;
+      const cashPay = amount - balanceDeduct;
       if (cashPay > 0n) {
-        throw Err.conflict('订单仍需现金支付，但系统尚未配置现金支付渠道。请调整权益值或钱包抵扣后重试');
+        throw Err.conflict('订单仍需现金支付，但系统尚未配置现金支付渠道。请补足钱包余额后重试');
       }
       const order = await tx.order.create({
         data: {
@@ -138,7 +144,7 @@ export class OrderService {
           packageId: packageRow?.id ?? null,
           fromPackageId: params.type === 2 ? user.packageId : null,
           amount,
-          equityDeduct,
+          equityDeduct: 0n,
           balanceDeduct,
           cashPay,
           ...(shippingAddress ? { shippingAddress: shippingAddress as never } : {}),
@@ -152,6 +158,10 @@ export class OrderService {
         },
       });
 
+      if (params.type === 4 && balanceDeduct > 0n) {
+        await this.transferQuota.consumeWalletSpend(params.userId, balanceDeduct, order.orderNo, tx);
+      }
+
       if (params.type === 4 && params.productId) {
         const updated = await tx.product.updateMany({
           where: { id: params.productId, stock: { gte: quantity }, status: 1 },
@@ -159,11 +169,22 @@ export class OrderService {
         });
         if (!updated.count) throw Err.conflict('商品库存不足，请刷新后重试');
       }
+      await tx.idempotencyKey.update({ where: { key: idempotencyKey }, data: { result: { orderNo: order.orderNo } } });
       return order;
-    });
+    };
+    try {
+      return await this.prisma.$transaction(createInTransaction);
+    } catch (error) {
+      if ((error as { code?: string })?.code !== 'P2002') throw error;
+      const previous = await this.prisma.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
+      if (!previous || previous.scene !== scene) throw error;
+      const orderNo = (previous.result as { orderNo?: string } | null)?.orderNo;
+      if (!orderNo) throw Err.conflict('订单请求正在处理中，请稍后刷新订单列表');
+      return this.prisma.order.findUniqueOrThrow({ where: { orderNo } });
+    }
   }
 
-  /** 确认收货 → COMPLETED：写业绩、发权益值、建直推奖计划、更新档位与计酬状态 */
+  /** 确认收货 → COMPLETED：写业绩、发放权益通、建直推奖计划并更新档位 */
   async complete(orderNo: string, userId?: bigint) {
     const order = await this.prisma.order.findUnique({ where: { orderNo } });
     if (!order) throw Err.notFound('订单不存在');
@@ -199,41 +220,37 @@ export class OrderService {
         data: {
           packageId: pkg.id,
           packageExpireAt: new Date(now.getTime() + pkg.durationDays * 86400_000),
-          equityStatus: 0, // 复购恢复计酬
+          transferQuotaStatus: 0,
         },
       });
 
-      // 权益值 = 礼包价 × 3；升级只补差额，不回收已用部分
-      let grantAmount = pkg.equityValue;
+      // 权益通：新购/复消发放所选档位额度，升级仅补档位差额。
+      let grantAmount = pkg.transferQuota;
       if (order.type === 2 && order.fromPackageId) {
         const oldPkg = await tx.package.findUnique({ where: { id: order.fromPackageId } });
-        grantAmount = pkg.equityValue - (oldPkg?.equityValue ?? 0n);
+        grantAmount = pkg.transferQuota - (oldPkg?.transferQuota ?? 0n);
       }
       if (grantAmount > 0n) {
-        const expireAt = new Date(now);
-        expireAt.setMonth(expireAt.getMonth() + Number(await this.config.getNumber('equity.expire_months', 12)));
-        await this.equity.grant(
+        await this.transferQuota.grant(
           order.userId,
           grantAmount,
-          order.type === 2 ? 'UPGRADE' : 'GRANT',
+          `package_${order.type}`,
           order.orderNo,
-          expireAt,
-          `order_${order.type}_${order.orderNo}`,
+          order.type === 3 ? '会员复消，新增权益通' : order.type === 2 ? '会员升级，补充权益通差额' : '会员开通档位，获得权益通',
           tx,
         );
       }
 
-      // 直推奖计划：新购/升级 100%，复消 10%，分 20 期
+      // 直推奖按礼包档位覆盖值计算，未设置时继承全局参数；生成后由计划和期次快照锁定
       const rewardRecipient = order.parentIdSnapshot
         ? await tx.user.findUnique({ where: { id: order.parentIdSnapshot }, select: { status: true } })
         : null;
       if (order.parentIdSnapshot && rewardRecipient?.status === 0) {
-        const rate = await this.config.getNumber(
-          order.type === 3 ? 'bonus.repurchase_rate' : 'bonus.reward_rate',
-          order.type === 3 ? 0.1 : 1.0,
-        );
+        const rate = order.type === 3
+          ? Number(pkg.repurchaseRewardRate ?? await this.config.getNumber('bonus.repurchase_rate', 0.1))
+          : Number(pkg.directRewardRate ?? await this.config.getNumber('bonus.reward_rate', 1.0));
         const total = BigInt(Math.round(Number(order.amount) * rate));
-        const periods = await this.config.getNumber('bonus.direct_periods', 20);
+        const periods = Number(pkg.directReleaseDays ?? await this.config.getNumber('bonus.direct_periods', 20));
         if (total > 0n) {
           // 统一 UTC 口径：第 1 期到期 = 订单完成日次日 UTC 00:00（与结算日 UTC 00:00 对齐，避免时区边界漂移）
           const startAt = new Date(now);

@@ -93,7 +93,7 @@ onMounted(async () => {
         <span class="income-assets-icon"><WalletCards :size="19" aria-hidden="true" /></span>
         <div>
           <div style="font-size:13px;font-weight:600">查看我的资产</div>
-          <div class="subtitle" style="font-size:10.5px;margin-top:3px">钱包余额 · 权益值 · 转账</div>
+          <div class="subtitle" style="font-size:10.5px;margin-top:3px">钱包余额 · 权益通 · 太阳值</div>
         </div>
       </div>
       <ChevronRight :size="18" class="muted" aria-hidden="true" />
@@ -134,7 +134,7 @@ onMounted(async () => {
         </div>
         <div style="text-align:right">
           <div class="green" style="font-size:15px;font-weight:650">+¥{{ money(r.amount) }}</div>
-          <div class="subtitle" style="font-size:10px;margin-top:3px">现金 {{ money(r.cashAmount) }} · 数权 {{ money(r.tokenAmount) }}</div>
+          <div class="subtitle" style="font-size:10px;margin-top:3px">现金 {{ money(r.cashAmount) }} · 太阳值 {{ money(r.tokenAmount) }}</div>
         </div>
       </div>
     </div>

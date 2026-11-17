@@ -135,8 +135,8 @@ onMounted(load);
         </div>
 
         <div class="order-payment">
-          <span>权益抵扣 <strong>¥{{ money(order.equityDeduct) }}</strong></span>
-          <span>余额抵扣 <strong>¥{{ money(order.balanceDeduct) }}</strong></span>
+          <span v-if="Number(order.equityDeduct) > 0">历史权益抵扣 <strong>¥{{ money(order.equityDeduct) }}</strong></span>
+          <span>钱包余额 <strong>¥{{ money(order.balanceDeduct) }}</strong></span>
           <span>现金支付 <strong>¥{{ money(order.cashPay) }}</strong></span>
         </div>
         <div v-if="order.shippingAddress" class="order-shipping-address">

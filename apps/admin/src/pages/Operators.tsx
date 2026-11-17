@@ -8,7 +8,7 @@ import {
 } from '@solar/shared';
 import { api, fmtDate, post, put } from '../api';
 import {
-  Badge, Button, Card, CardHeader, Field, Modal, PageHeader, SearchField, SelectField, TableSkeleton, Toast,
+  Badge, Button, Card, CardHeader, Field, Modal, PageHeader, SearchField, SelectField, TableSkeleton, Toast, useConfirm,
 } from '../components/ui';
 
 interface OperatorAccount {
@@ -68,6 +68,7 @@ export function Operators() {
   const [busyId, setBusyId] = useState('');
   const [toast, setToast] = useState('');
   const [toastTone, setToastTone] = useState<'success' | 'error' | 'info'>('info');
+  const { confirm, confirmNode } = useConfirm();
   const selfId = currentAdminId();
 
   const load = async () => {
@@ -137,6 +138,18 @@ export function Operators() {
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (saving) return;
+    const action = editing === null ? '创建' : '更新';
+    const permissionCount = form.customPermissions && form.role !== 'SUPER_ADMIN'
+      ? form.permissionCodes.length
+      : ADMIN_ROLE_PERMISSION_CODES[form.role].length;
+    const agreed = await confirm({
+      title: `确认${action}运营管理账号？`,
+      description: `${form.nickname.trim()} · ${form.phone} · ${ADMIN_ROLE_LABELS[form.role]} · ${permissionCount} 项页面权限。账号权限变更会立即生效。`,
+      confirmText: `确认${action}账号`,
+      tone: form.role === 'SUPER_ADMIN' ? 'danger' : 'primary',
+      confirmationText: `${action}运营账号 ${form.nickname.trim()} ${form.phone}`,
+    });
+    if (!agreed) return;
     setSaving(true);
     try {
       const body = {
@@ -160,9 +173,18 @@ export function Operators() {
 
   const toggleStatus = async (account: OperatorAccount) => {
     if (account.id === selfId) return;
+    const nextStatus = account.status === 0 ? 1 : 0;
+    const action = nextStatus === 1 ? '停用' : '启用';
+    const agreed = await confirm({
+      title: `确认${action}运营账号？`,
+      description: `${account.nickname ?? '未设置昵称'}（${account.phone ?? account.id}）。${nextStatus === 1 ? '停用后后续管理请求会被拒绝。' : '启用后该账号将恢复现有角色权限。'}`,
+      confirmText: `确认${action}账号`,
+      tone: nextStatus === 1 ? 'danger' : 'primary',
+      confirmationText: `${action}运营账号 ${account.nickname ?? account.phone ?? account.id}`,
+    });
+    if (!agreed) return;
     setBusyId(account.id);
     try {
-      const nextStatus = account.status === 0 ? 1 : 0;
       await put(`/admin/operators/${account.id}/status`, { status: nextStatus });
       notify(nextStatus === 1 ? '账号已停用，后续请求将被拒绝' : '账号已重新启用', 'success');
       await load();
@@ -362,6 +384,7 @@ export function Operators() {
       )}
 
       {toast && <Toast message={toast} tone={toastTone} onClose={() => setToast('')} />}
+      {confirmNode}
     </>
   );
 }

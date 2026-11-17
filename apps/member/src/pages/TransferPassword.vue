@@ -13,9 +13,12 @@ const saving = ref(false);
 const currentPassword = ref('');
 const newPassword = ref('');
 const confirmPassword = ref('');
+const resetMode = ref(false);
+const realName = ref('');
+const idCard = ref('');
 const error = ref('');
 const valid = computed(() => /^\d{6}$/.test(newPassword.value) && newPassword.value === confirmPassword.value &&
-  (!configured.value || /^\d{6}$/.test(currentPassword.value)) && !saving.value);
+  (resetMode.value ? realName.value.trim().length >= 2 && /^\d{17}[\dXx]$/.test(idCard.value) : !configured.value || /^\d{6}$/.test(currentPassword.value)) && !saving.value);
 
 async function load() {
   loading.value = true;
@@ -35,15 +38,17 @@ async function save() {
   saving.value = true;
   error.value = '';
   try {
-    await post('/me/transfer-password', {
-      ...(configured.value ? { currentPassword: currentPassword.value } : {}),
-      newPassword: newPassword.value,
-    });
+    await post(resetMode.value ? '/me/transfer-password/reset' : '/me/transfer-password', resetMode.value
+      ? { realName: realName.value.trim(), idCard: idCard.value.trim().toUpperCase(), newPassword: newPassword.value }
+      : { ...(configured.value ? { currentPassword: currentPassword.value } : {}), newPassword: newPassword.value });
     configured.value = true;
     if (store.profile) store.profile.transferPasswordSet = true;
     currentPassword.value = '';
     newPassword.value = '';
     confirmPassword.value = '';
+    realName.value = '';
+    idCard.value = '';
+    resetMode.value = false;
     Toast('转账支付密码已保存', 'success');
   } catch (cause: any) {
     error.value = cause.message ?? '密码保存失败';
@@ -57,28 +62,31 @@ onMounted(load);
 
 <template>
   <main class="page transfer-password-page">
-    <PageHeading back eyebrow="账户安全" title="转账支付密码" subtitle="发起钱包转账或权益转让时需要验证" />
+    <PageHeading back eyebrow="账户安全" title="转账支付密码" subtitle="发起钱包余额或太阳值转账时需要验证" />
 
     <section class="security-status-card" :class="{ 'security-status-card--ready': configured }">
       <span class="security-status-icon"><ShieldCheck :size="20" aria-hidden="true" /></span>
-      <div><strong>{{ configured ? '支付密码已设置' : '尚未设置支付密码' }}</strong><span>{{ configured ? '转账时将要求验证 6 位支付密码' : '设置后即可发起钱包转账和权益转让' }}</span></div>
+      <div><strong>{{ configured ? '支付密码已设置' : '尚未设置支付密码' }}</strong><span>{{ configured ? '转账时将要求验证 6 位支付密码' : '设置后即可发起钱包余额和太阳值转账' }}</span></div>
       <Check v-if="configured" :size="17" class="security-status-check" aria-hidden="true" />
     </section>
 
     <section class="security-form-card">
-      <div class="security-form-title"><KeyRound :size="17" aria-hidden="true" /><strong>{{ configured ? '修改支付密码' : '设置支付密码' }}</strong></div>
+      <div class="security-form-title"><KeyRound :size="17" aria-hidden="true" /><strong>{{ resetMode ? '身份核验并重置密码' : configured ? '修改支付密码' : '设置支付密码' }}</strong></div>
       <div v-if="loading" class="security-loading" aria-label="安全设置加载中"><span class="skeleton-block" /><span class="skeleton-block" /></div>
       <form v-else class="security-form" @submit.prevent="save">
-        <label v-if="configured" class="app-field"><span>当前支付密码</span><input v-model="currentPassword" class="input" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="请输入当前 6 位密码" /></label>
+        <label v-if="resetMode" class="app-field"><span>实名认证姓名</span><input v-model="realName" class="input" autocomplete="name" placeholder="输入已审核通过的真实姓名" /></label>
+        <label v-if="resetMode" class="app-field"><span>身份证号</span><input v-model="idCard" class="input" maxlength="18" autocomplete="off" placeholder="输入实名认证时使用的身份证号" /></label>
+        <label v-else-if="configured" class="app-field"><span>当前支付密码</span><input v-model="currentPassword" class="input" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="请输入当前 6 位密码" /></label>
         <label class="app-field"><span>新支付密码</span><input v-model="newPassword" class="input" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" placeholder="设置 6 位数字密码" /></label>
         <label class="app-field"><span>确认新密码</span><input v-model="confirmPassword" class="input" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" placeholder="再次输入新密码" /></label>
         <p class="security-hint">请勿使用生日、连续数字或与登录密码相同的密码。平台不会以明文保存支付密码。</p>
         <div v-if="error" class="security-error" role="alert">{{ error }}</div>
-        <button type="submit" class="btn btn-primary security-submit" :disabled="!valid">{{ saving ? '保存中…' : configured ? '确认修改' : '设置支付密码' }}</button>
+        <button type="submit" class="btn btn-primary security-submit" :disabled="!valid">{{ saving ? '保存中…' : resetMode ? '核验并重置' : configured ? '确认修改' : '设置支付密码' }}</button>
       </form>
+      <button v-if="configured && !loading" type="button" class="security-reset-link" @click="resetMode = !resetMode; error = ''; newPassword = ''; confirmPassword = ''; currentPassword = ''">{{ resetMode ? '返回修改密码' : '忘记支付密码？通过实名信息重置' }}</button>
     </section>
 
-    <div class="security-notice"><ShieldCheck :size="16" aria-hidden="true" /><span>连续输错 5 次将锁定验证 15 分钟。忘记密码后需完成身份核验才能重置，请联系平台客服。</span></div>
+    <div class="security-notice"><ShieldCheck :size="16" aria-hidden="true" /><span>连续输错 5 次将锁定验证 15 分钟。重置需要平台已审核通过的实名信息。</span></div>
   </main>
 </template>
 
@@ -99,6 +107,7 @@ onMounted(load);
 .security-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
 .security-error { padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); border-radius: 10px; color: var(--danger); font-size: 11px; }
 .security-submit { width: 100%; margin-top: 2px; }
+.security-reset-link { display: block; margin: 12px auto 0; border: 0; background: transparent; color: var(--brand); font-size: 11px; }
 .security-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .security-notice svg { flex: 0 0 auto; margin-top: 1px; color: var(--brand); }
 .security-loading { display: grid; gap: 10px; }

@@ -3,9 +3,9 @@ import { BonusService } from '../bonus/bonus.service';
 import { ConfigService } from '../config/config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
-import { aggregateTeam, perCapita, judgeRank, shouldLockPeer, selectGlobalExcludedLine, effectiveTeamBase, type AggUser } from './engines';
+import { aggregateTeam, perCapita, judgeRank, shouldLockPeer, selectMaxExcludedLines, effectiveTeamBase, type AggUser } from './engines';
 
-export { aggregateTeam, selectGlobalExcludedLine, effectiveTeamBase } from './engines';
+export { aggregateTeam, selectMaxExcludedLines, effectiveTeamBase } from './engines';
 
 /** 每日结算：11 步，支持断点续跑 + 幂等 + Redis 锁 */
 @Injectable()
@@ -120,7 +120,7 @@ export class SettlementService {
       this.prisma.user.findMany({
         // 平台账号（超管/运营/财务/客服）不参与计酬与业绩归集
         where: { status: { not: 2 }, role: 'MEMBER' },
-        select: { id: true, parentId: true, depth: true, rankLevel: true, equityStatus: true, peerBonusLocked: true },
+        select: { id: true, parentId: true, depth: true, rankLevel: true, peerBonusLocked: true },
       }),
     ]);
 
@@ -214,7 +214,7 @@ export class SettlementService {
     }
   }
 
-  /** Step6: 直推奖分期释放（计划一定跑完，暂停计酬不影响） */
+  /** Step6: 直推奖分期释放；权益通不影响奖金计划。 */
   private async step6DirectRelease(date: Date): Promise<void> {
     const stages = await this.prisma.bonusStage.findMany({
       where: { status: 'PENDING', dueAt: { lte: date }, plan: { status: { in: ['PENDING', 'RELEASING'] } } },
@@ -245,13 +245,13 @@ export class SettlementService {
     }
   }
 
-  /** 构建「直接下线 → 子树当日业绩」表，并全局选出业绩最大的一条直推线（唯一一条） */
+  /** 构建「直接下线 → 子树当日业绩」表，并为每位会员选出自己最大的一条直推线 */
   private buildExclusion(
     rows: Array<{ userId: bigint; teamAmount: bigint; user: { parentId: bigint | null } }>,
     ratio: number,
   ): {
     children: Map<bigint, Array<{ id: bigint; teamAmount: bigint }>>;
-    excludedLine: ReturnType<typeof selectGlobalExcludedLine>;
+    excludedLines: ReturnType<typeof selectMaxExcludedLines>;
   } {
     // 只统计「上级本身也是会员」的关系：平台账号（超管/运营等）不计酬，
     // 不能作为业务线顶点，否则最大线会落在平台账号上而永不生效。
@@ -264,7 +264,7 @@ export class SettlementService {
       list.push({ id: row.userId, teamAmount: row.teamAmount });
       children.set(pid, list);
     }
-    return { children, excludedLine: selectGlobalExcludedLine(children, ratio) };
+    return { children, excludedLines: selectMaxExcludedLines(children, ratio) };
   }
 
   /** 团队奖剔除开关与占比阈值（ratio=0 表示无条件剔除） */
@@ -274,17 +274,7 @@ export class SettlementService {
     return { enabled, ratio };
   }
 
-  /** 该下级是否落在被剔除的直推线上（含被剔除下线本身：其 path 不含自身 id） */
-  private isOnExcludedLine(
-    userId: bigint,
-    path: string | null,
-    excludedLine: { childId: bigint } | null,
-  ): boolean {
-    if (!excludedLine) return false;
-    return userId === excludedLine.childId || (path ?? '').includes(`,${excludedLine.childId},`);
-  }
-
-  /** Step7: 团队奖 = 有效基数 × 自己费率；全局剔除业绩最大的一条直推线 */
+  /** Step7: 团队奖 =（伞下当日业绩 - 本人最大直推线业绩）× 自己费率 */
   private async step7TeamBonus(date: Date): Promise<void> {
     const ranks = await this.prisma.rank.findMany();
     // 按 level 建索引：teamPerformance 存的是 rankLevel，与 rank.id 无必然关系
@@ -294,21 +284,19 @@ export class SettlementService {
     // 取全部行（含 rankLevel=0）：下线可能未晋升，但其业绩仍参与上级基数计算
     const rows = await this.prisma.teamPerformance.findMany({
       where: { statDate: date },
-      include: { user: { select: { parentId: true, equityStatus: true, rankLevel: true } } },
+      include: { user: { select: { parentId: true, rankLevel: true } } },
     });
-    const { children, excludedLine } = this.buildExclusion(rows, enabled ? ratio : 0);
+    const { children, excludedLines } = this.buildExclusion(rows, enabled ? ratio : 0);
 
     for (const row of rows) {
       if (row.user.rankLevel <= 0) continue;
-      if (row.user.equityStatus !== 0) continue; // 暂停计酬
       const rate = rateMap.get(row.rankLevel) ?? 0;
-      // 只有被剔除线的直接上级需要扣减；其余上级按全额伞下业绩计奖
-      const isExcludedParent = excludedLine !== null && excludedLine.parentId === row.userId;
-      const base = isExcludedParent
+      const excludedLine = excludedLines.get(row.userId);
+      const base = excludedLine
         ? effectiveTeamBase(row.teamAmount, children.get(row.userId) ?? [], new Set([excludedLine.childId]))
         : row.teamAmount;
       const amount = BigInt(Math.round(Number(base) * rate));
-      if (isExcludedParent) {
+      if (excludedLine) {
         await this.prisma.auditLog.create({
           data: {
             operatorType: 'SYSTEM',
@@ -318,6 +306,7 @@ export class SettlementService {
             after: {
               statDate: date.toISOString().slice(0, 10),
               excludedLineId: excludedLine.childId.toString(),
+              excludedLineAmount: excludedLine.amount.toString(),
               teamAmount: row.teamAmount.toString(),
               effectiveBase: base.toString(),
             } as never,
@@ -334,7 +323,7 @@ export class SettlementService {
     }
   }
 
-  /** Step8: 平级奖（历史锁定）+ 领导奖，按 depth 从深到浅；被剔除的最大线不参与 */
+  /** Step8: 平级奖（历史锁定）+ 领导奖；仅排除每位上级自己的最大直推关系 */
   private async step8PeerLeader(date: Date): Promise<void> {
     const ranks = await this.prisma.rank.findMany();
     const rateMap = new Map(ranks.map((r) => [r.level, Number(r.teamRate)]));
@@ -348,17 +337,15 @@ export class SettlementService {
         user: {
           select: {
             parentId: true,
-            path: true,
             rankLevel: true,
-            equityStatus: true,
             peerBonusLocked: true,
-            parent: { select: { rankLevel: true, equityStatus: true, status: true } },
+            parent: { select: { rankLevel: true, status: true } },
           },
         },
       },
       orderBy: { user: { depth: 'desc' } },
     });
-    const { children, excludedLine } = this.buildExclusion(rows, enabled ? ratio : 0);
+    const { children, excludedLines } = this.buildExclusion(rows, enabled ? ratio : 0);
 
     for (const row of rows) {
       const x = row.user;
@@ -366,14 +353,17 @@ export class SettlementService {
       if (!p || x.rankLevel <= 0) continue;
       if (p.status === 2) continue; // 已注销上级不再获得新增平级奖或领导奖
 
-      // 下级落在被剔除的直推线上 → 其领导奖（上级奖励）与平级奖（同级奖励）一并剔除
-      if (this.isOnExcludedLine(row.userId, x.path, excludedLine)) continue;
+      // 当前父子关系若正是该上级的最大推广线，则该直推关系不产生领导奖/平级奖。
+      // 推广线内部的其他会员仍按各自伞下规则结算。
+      const parentId = x.parentId;
+      if (parentId !== null && excludedLines.get(parentId)?.childId === row.userId) continue;
 
       // 领导奖/平级奖的基数是「下级实际拿到的团队奖」
+      const childExcludedLine = excludedLines.get(row.userId);
       const base = effectiveTeamBase(
         row.teamAmount,
         children.get(row.userId) ?? [],
-        new Set(excludedLine && excludedLine.parentId === row.userId ? [excludedLine.childId] : []),
+        new Set(childExcludedLine ? [childExcludedLine.childId] : []),
       );
       const teamBonus = BigInt(Math.round(Number(base) * (rateMap.get(x.rankLevel) ?? 0)));
       if (teamBonus <= 0n) continue;
@@ -396,8 +386,6 @@ export class SettlementService {
         });
         locked = true;
       }
-
-      if (p.equityStatus !== 0) continue; // 上级暂停时，锁定照常维护但不发钱
 
       if (locked) {
         await this.bonus.creditBonus({
@@ -435,7 +423,7 @@ export class SettlementService {
       if (share <= 0n) continue; // 人数为 0 时不除零，池子沉淀为平台留存
 
       const users = await this.prisma.user.findMany({
-        where: { rankId: rank.id, equityStatus: 0, status: 0, role: 'MEMBER' },
+        where: { rankId: rank.id, status: 0, role: 'MEMBER' },
         select: { id: true },
       });
       for (const u of users) {
@@ -464,7 +452,7 @@ export class SettlementService {
   /** 每日对账：5 条恒等式 */
   async reconcile(date: Date) {
     const d = this.toDate(date);
-    // 口径统一：以「结算日归属」的奖金记录为准，再按其关联的钱包流水/数权批次核对，
+    // 口径统一：以「结算日归属」的奖金记录为准，再按其关联的钱包流水/太阳值批次核对，
     // 避免日结在次日凌晨执行时 walletTransaction.createdAt 与 settleDate 跨自然日错位。
     const records = await this.prisma.bonusRecord.findMany({
       where: { settleDate: d },
@@ -475,7 +463,7 @@ export class SettlementService {
     const txIds = records.map((r) => r.walletTransactionId).filter((id): id is bigint => id !== null);
     const recordIds = records.map((r) => r.id);
 
-    const [walletType1, tokenLots, walletSum, wallets, dividendSum, poolSum, equitySum, equityAccounts] =
+    const [walletType1, tokenLots, walletSum, wallets, dividendSum, poolSum, quotaAccounts, quotaTransfers, productWalletSpends] =
       await Promise.all([
         txIds.length
           ? this.prisma.walletTransaction.aggregate({ where: { id: { in: txIds } }, _sum: { changeAmount: true } })
@@ -487,22 +475,62 @@ export class SettlementService {
         this.prisma.wallet.findMany({ select: { balance: true, frozen: true } }),
         this.prisma.dividend.aggregate({ where: { statDate: d }, _sum: { amount: true } }),
         this.prisma.rankSnapshot.aggregate({ where: { statDate: d }, _sum: { poolAmount: true } }),
-        this.prisma.equityTransaction.aggregate({ _sum: { changeAmount: true } }),
-        this.prisma.equityAccount.findMany({ select: { balance: true } }),
+        this.prisma.transferQuotaAccount.findMany({
+          select: { userId: true, granted: true, adjustedOut: true, used: true, reserved: true, user: { select: { packageId: true, transferQuotaStatus: true } } },
+        }),
+        this.prisma.walletTransfer.groupBy({
+          by: ['fromUserId', 'status'], _sum: { amount: true },
+        }),
+        this.prisma.$queryRaw<Array<{ userId: bigint; balanceDeduct: bigint }>>`
+          SELECT o."userId", COALESCE(SUM(o."balanceDeduct"), 0)::bigint AS "balanceDeduct"
+          FROM "Order" o
+          WHERE o."type" = 4 AND o."status" IN (1, 2, 3) AND o."balanceDeduct" > 0
+            AND EXISTS (
+              SELECT 1 FROM "Order" p
+              WHERE p."userId" = o."userId" AND p."type" IN (1, 2, 3)
+                AND p."status" = 3
+                AND COALESCE(p."finishedAt", p."paidAt", p."createdAt") <= COALESCE(o."paidAt", o."createdAt")
+            )
+          GROUP BY o."userId"
+        `,
       ]);
 
     const sum = (rows: Array<{ balance?: bigint; frozen?: bigint }>) =>
       rows.reduce((s, r) => s + (r.balance ?? 0n) + (r.frozen ?? 0n), 0n);
     const walletTotal = sum(wallets);
-    const equityTotal = equityAccounts.reduce((s, r) => s + r.balance, 0n);
+    const expectedByUser = new Map<string, { used: bigint; reserved: bigint }>();
+    for (const row of quotaTransfers) {
+      const id = row.fromUserId.toString();
+      const entry = expectedByUser.get(id) ?? { used: 0n, reserved: 0n };
+      if (row.status === 'COMPLETED') entry.used += row._sum.amount ?? 0n;
+      if (row.status === 'PENDING') entry.reserved += row._sum.amount ?? 0n;
+      expectedByUser.set(id, entry);
+    }
+    for (const row of productWalletSpends) {
+      const id = row.userId.toString();
+      const entry = expectedByUser.get(id) ?? { used: 0n, reserved: 0n };
+      entry.used += row.balanceDeduct;
+      expectedByUser.set(id, entry);
+    }
+    const quotaByUser = new Map(quotaAccounts.map((row) => [row.userId.toString(), row]));
+    const quotaUserIds = new Set([...expectedByUser.keys(), ...quotaByUser.keys()]);
+    const quotaConsistent = [...quotaUserIds].every((id) => {
+      const account = quotaByUser.get(id);
+      const expected = expectedByUser.get(id) ?? { used: 0n, reserved: 0n };
+      if (!account) return expected.used === 0n && expected.reserved === 0n;
+      const status = account.user.packageId !== null && account.granted - account.adjustedOut <= account.used ? 1 : 0;
+      return account.used === expected.used
+        && account.reserved === expected.reserved
+        && account.user.transferQuotaStatus === status;
+    });
 
     const checks = [
       { name: '奖金现金 = 钱包奖金流水', ok: cashBonus === (walletType1._sum.changeAmount ?? 0n) },
-      { name: '奖金数权 = 数权批次', ok: tokenBonus === (tokenLots._sum.amount ?? 0n) },
+      { name: '奖金太阳值 = 太阳值批次', ok: tokenBonus === (tokenLots._sum.amount ?? 0n) },
       { name: '钱包流水合计 = 钱包余额+冻结', ok: (walletSum._sum.changeAmount ?? 0n) === walletTotal,
         detail: { flow: (walletSum._sum.changeAmount ?? 0n).toString(), balance: walletTotal.toString() } },
       { name: '分红合计 ≤ 分红池总额', ok: (dividendSum._sum.amount ?? 0n) <= (poolSum._sum.poolAmount ?? 0n) },
-      { name: '权益值流水合计 = 权益值余额', ok: (equitySum._sum.changeAmount ?? 0n) === equityTotal },
+      { name: '权益通已用/预占 = 转账及商城钱包消费统计', ok: quotaConsistent },
     ];
     return { statDate: d.toISOString().slice(0, 10), checks, allPassed: checks.every((c) => c.ok) };
   }

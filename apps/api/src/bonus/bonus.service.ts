@@ -18,7 +18,7 @@ export interface CreditBonusParams {
   idempotencyKey: string;
 }
 
-/** 奖金入账：拆分 70% 钱包 + 30% 数权，在入账时一次完成 */
+/** 奖金入账：拆分 70% 钱包 + 30% 太阳值，在入账时一次完成 */
 @Injectable()
 export class BonusService {
   constructor(

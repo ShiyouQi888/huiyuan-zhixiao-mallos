@@ -14,7 +14,6 @@ const store = useUserStore();
 const packages = ref<any[]>([]);
 const profile = ref<any>(null);
 const selected = ref<{ item: any; mode: 'purchase' | 'upgrade' | 'repurchase' } | null>(null);
-const useEquity = ref(true);
 const useBalance = ref(true);
 const busy = ref(false);
 const loading = ref(true);
@@ -33,7 +32,7 @@ const actionModes = computed(() => {
   if (!profile.value?.packageId) return store.has('package.purchase') ? ['purchase'] : [];
   const modes: Array<'upgrade' | 'repurchase'> = [];
   if (store.has('member.upgrade')) modes.push('upgrade');
-  if (profile.value.equityStatus === 1 && store.has('member.repurchase')) modes.push('repurchase');
+  if (profile.value.transferQuotaAccount?.repurchaseRequired && store.has('member.repurchase')) modes.push('repurchase');
   return modes;
 });
 const selectedModeLabel = computed(() => ({
@@ -42,9 +41,9 @@ const selectedModeLabel = computed(() => ({
 const selectedAmount = computed(() => selected.value?.mode === 'upgrade'
   ? Number(selected.value.item.price) - Number(currentPackage.value?.price ?? 0)
   : Number(selected.value?.item.price ?? 0));
-const selectedEquity = computed(() => selected.value?.mode === 'upgrade'
-  ? Number(selected.value.item.equityValue) - Number(currentPackage.value?.equityValue ?? 0)
-  : Number(selected.value?.item.equityValue ?? 0));
+const selectedQuota = computed(() => selected.value?.mode === 'upgrade'
+  ? Number(selected.value.item.transferQuota) - Number(currentPackage.value?.transferQuota ?? 0)
+  : Number(selected.value?.item.transferQuota ?? 0));
 const visiblePackages = computed(() => packages.value.filter((item) => {
   if (!profile.value?.packageId) return actionModes.value.includes('purchase');
   const currentLevel = Number(currentPackage.value?.level ?? 0);
@@ -53,9 +52,8 @@ const visiblePackages = computed(() => packages.value.filter((item) => {
 }));
 const profileStatusLabel = computed(() => {
   if (!currentPackage.value) return '尚未开通会员档位';
-  return profile.value?.equityStatus === 1 ? '权益值已用完 · 可复消恢复计酬' : '会员权益正常';
+  return profile.value?.transferQuotaAccount?.repurchaseRequired ? '权益通已用完 · 复消可解锁' : '权益通可用';
 });
-const canUseEquity = computed(() => store.has('equity.account'));
 const canUseBalance = computed(() => store.has('wallet.account'));
 
 async function load() {
@@ -64,7 +62,6 @@ async function load() {
   try {
     await store.loadProfile();
     profile.value = store.profile;
-    useEquity.value = canUseEquity.value;
     useBalance.value = canUseBalance.value;
     packages.value = await api<any[]>('/packages');
   } catch (e: any) {
@@ -80,7 +77,7 @@ function modesFor(item: any): Array<'purchase' | 'upgrade' | 'repurchase'> {
   if (!profile.value?.packageId) return store.has('package.purchase') ? ['purchase'] : [];
   const modes: Array<'upgrade' | 'repurchase'> = [];
   if (store.has('member.upgrade') && Number(item.level) > Number(currentPackage.value?.level ?? 0)) modes.push('upgrade');
-  if (profile.value.equityStatus === 1 && store.has('member.repurchase')) modes.push('repurchase');
+  if (profile.value.transferQuotaAccount?.repurchaseRequired && store.has('member.repurchase')) modes.push('repurchase');
   return modes;
 }
 
@@ -95,7 +92,6 @@ async function buy() {
     const order = await post('/orders', {
       type: selected.value.mode === 'upgrade' ? 2 : selected.value.mode === 'repurchase' ? 3 : 1,
       packageId: selected.value.item.id,
-      useEquity: useEquity.value,
       useBalance: useBalance.value,
     });
     Toast(`${selectedModeLabel.value}订单 ${order.orderNo} 已创建`, 'success');
@@ -122,7 +118,7 @@ async function buy() {
       </div>
       <div v-if="currentPackage" class="current-membership-meta">
         <span>档位价格 <strong>¥{{ money(currentPackage.price) }}</strong></span>
-        <span>权益值 <strong>¥{{ money(profile.equityAccount?.balance ?? 0) }}</strong></span>
+        <span>可用权益通 <strong>{{ money(profile.transferQuotaAccount?.available ?? 0) }}</strong></span>
       </div>
     </section>
 
@@ -145,8 +141,8 @@ async function buy() {
         <div class="package-price">¥{{ money(item.price) }}</div>
         <div class="package-duration">有效期 {{ item.durationDays }} 天</div>
         <div class="package-benefit">
-          <div><BadgeCheck :size="15" aria-hidden="true" /> 获得权益值</div>
-          <strong>¥{{ money(item.equityValue) }}</strong>
+          <div><BadgeCheck :size="15" aria-hidden="true" /> 权益通</div>
+          <strong>{{ money(item.transferQuota) }}</strong>
         </div>
         <section class="package-products" :aria-label="`${item.name}关联商品`">
           <div class="package-products-heading">
@@ -179,27 +175,22 @@ async function buy() {
       </article>
     </div>
     <EmptyState v-else-if="!loading && !loadError" title="当前没有可执行的档位操作"
-      :description="currentPackage ? '当前权益仍在有效状态，或已处于最高可升级档位。复消入口会在权益值用完后开放。' : '暂无可开通的档位，请联系平台运营人员。'"
+      :description="currentPackage ? '当前权益通仍可用，或已处于最高可升级档位。权益通用完后可复消解锁。' : '暂无可开通的档位，请联系平台运营人员。'"
       action-label="返回商城" @action="router.push('/')" />
     <EmptyState v-else-if="loadError" title="档位信息暂时无法加载" :description="loadError" action-label="重新加载" @action="load" />
 
     <div class="package-note">
       <BadgeCheck :size="15" aria-hidden="true" />
-      <span>下单时可选择使用权益值与钱包余额抵扣；权益值也可会员间转账，额度用完后可通过复消恢复。</span>
+      <span>钱包余额用于商城消费与会员间转账；钱包转出和商城商品消费会计入权益通消耗，超额消费会抵算后续复消新增额度；会员卡购买、升级与复消不消耗权益通。</span>
     </div>
 
     <AppModal v-model="confirmOpen" eyebrow="订单确认" :title="`${selectedModeLabel} · ${selected?.item.name ?? ''}`"
-      description="核对本次应付金额与到账权益值后提交订单。" :confirm-loading="busy"
+      description="核对本次订单金额与新增权益通后提交订单。" :confirm-loading="busy"
       :confirm-text="`确认提交 · ¥${money(selectedAmount)}`"
-      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，新增权益值为两个档位权益值之差。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后恢复计酬并重新获得权益值。' : '提交后将创建订单；权益值与钱包余额按规则抵扣，剩余金额以订单为准。'" @confirm="buy">
+      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，并补充两个档位之间的权益通差额。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后将该档位权益通追加到账户。' : '订单金额由钱包余额抵扣；完成后按所选档位获得权益通。'" @confirm="buy">
       <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '档位差额' : '档位金额' }}</span><strong>¥{{ money(selectedAmount) }}</strong></div>
-      <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '新增权益值' : '到账权益值' }}</span><strong class="green">¥{{ money(selectedEquity) }}</strong></div>
+      <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '补充权益通' : '新增权益通' }}</span><strong class="green">{{ money(selectedQuota) }}</strong></div>
       <div v-if="selected?.mode === 'upgrade'" class="order-summary-row"><span>升级后档位</span><strong>{{ selected?.item.name }}</strong></div>
-      <label v-if="canUseEquity" class="deduction-option">
-        <input v-model="useEquity" type="checkbox" />
-        <span>使用权益值抵扣</span>
-        <span class="deduction-check"><Check :size="13" /></span>
-      </label>
       <label v-if="canUseBalance" class="deduction-option">
         <input v-model="useBalance" type="checkbox" />
         <span>使用钱包余额抵扣</span>

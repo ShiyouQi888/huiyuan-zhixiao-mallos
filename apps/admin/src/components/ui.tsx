@@ -10,7 +10,7 @@ import {
 import { Checkbox as TCheckbox, Input as TInput, Tag } from 'tdesign-react';
 import { createPortal } from 'react-dom';
 import {
-  AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Info, Inbox, Search, X,
+  AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Copy, Info, Inbox, Search, X,
 } from 'lucide-react';
 
 export function cx(...values: Array<string | false | null | undefined>) {
@@ -613,16 +613,33 @@ export interface ConfirmOptions {
   confirmText?: string;
   cancelText?: string;
   tone?: 'primary' | 'danger';
+  /** 高风险破坏性操作要求输入精确短语，支持键入或粘贴。 */
+  confirmationText?: string;
 }
 
 export function useConfirm() {
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
+  const [typedValue, setTypedValue] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState('');
   const resolver = useRef<((value: boolean) => void) | null>(null);
 
   const confirm = useCallback((next: ConfirmOptions) => new Promise<boolean>((resolve) => {
+    setTypedValue('');
+    setCopyFeedback('');
     resolver.current = resolve;
     setOptions(next);
   }), []);
+
+  const copyConfirmationText = async () => {
+    const phrase = options?.confirmationText?.trim();
+    if (!phrase) return;
+    try {
+      await navigator.clipboard.writeText(phrase);
+      setCopyFeedback('已复制，请粘贴到输入框');
+    } catch {
+      setCopyFeedback('复制不可用，可选中文字复制或手动输入');
+    }
+  };
 
   const settle = (value: boolean) => {
     resolver.current?.(value);
@@ -630,17 +647,49 @@ export function useConfirm() {
     setOptions(null);
   };
 
+  const requiredText = options?.confirmationText?.trim();
+  const confirmationValid = !requiredText || typedValue.trim() === requiredText;
+
   const confirmNode = (
     <Modal
       open={!!options}
-      onClose={() => settle(false)}
       title={options?.title ?? ''}
       description={options?.description}
       size="sm"
+      closeOnBackdrop={!requiredText}
+      onClose={() => settle(false)}
+      children={requiredText ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="confirm-required-text" className="text-xs font-medium text-ink-2">
+              输入 <span className="select-all break-all font-semibold text-danger">{requiredText}</span> 以继续
+            </label>
+            <Button size="xs" variant="secondary" onClick={() => void copyConfirmationText()}>
+              <Copy size={12} />复制短语
+            </Button>
+          </div>
+          <input
+            id="confirm-required-text"
+            className="input"
+            value={typedValue}
+            onChange={(event) => setTypedValue(event.target.value)}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            aria-label={`输入 ${requiredText} 以继续`}
+          />
+          {copyFeedback && <p className="m-0 text-2xs text-ink-faint" role="status">{copyFeedback}</p>}
+          <p className="m-0 text-2xs text-ink-faint">可粘贴或手动输入，内容需完全一致。</p>
+        </div>
+      ) : undefined}
       footer={(
         <>
           <Button onClick={() => settle(false)}>{options?.cancelText ?? '取消'}</Button>
-          <Button variant={options?.tone === 'danger' ? 'danger' : 'primary'} onClick={() => settle(true)}>
+          <Button
+            variant={options?.tone === 'danger' ? 'danger' : 'primary'}
+            disabled={!confirmationValid}
+            onClick={() => { if (confirmationValid) settle(true); }}
+          >
             {options?.confirmText ?? '确认'}
           </Button>
         </>

@@ -124,8 +124,41 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   return json.data;
 }
 
-export const post = <T = any>(path: string, body?: unknown) =>
-  api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+async function financialIdempotency(path: string, bodyText: string, token: string | null) {
+  const financialMutation = /^\/admin\/(?:members\/\d+\/(?:wallet\/(?:recharge|adjust|clear-available)|transfer-quota\/(?:grant|adjust|clear-available))|wallets\/\d+\/adjust|equity\/\d+\/adjust)$/.test(path);
+  if (!financialMutation) return undefined;
+  const scoped = `${token ?? ''}:${bodyText}`;
+  let fingerprint: string;
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(scoped));
+    fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    fingerprint = `${scoped.length}-${scoped.split('').reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 0)}`;
+  }
+  const storageKey = `solar_admin_idem:${path}:${fingerprint}`;
+  try {
+    const saved = sessionStorage.getItem(storageKey);
+    if (saved) return { key: saved, storageKey };
+  } catch { /* browser storage can be disabled */ }
+  const key = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try { sessionStorage.setItem(storageKey, key); } catch { /* send once without retry persistence */ }
+  return { key, storageKey };
+}
+
+export const post = async <T = any>(path: string, body?: unknown) => {
+  const bodyText = body === undefined ? '' : JSON.stringify(body);
+  const token = localStorage.getItem('solar_admin_token');
+  const idempotency = await financialIdempotency(path, bodyText, token);
+  const result = await api<T>(path, {
+    method: 'POST',
+    body: body === undefined ? undefined : bodyText,
+    headers: idempotency ? { 'X-Idempotency-Key': idempotency.key } : undefined,
+  });
+  if (idempotency) {
+    try { sessionStorage.removeItem(idempotency.storageKey); } catch { /* ignore */ }
+  }
+  return result;
+};
 
 export const put = <T = any>(path: string, body?: unknown) =>
   api<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) });

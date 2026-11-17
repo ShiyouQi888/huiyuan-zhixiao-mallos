@@ -52,6 +52,7 @@ export function Settlements() {
       description: '重跑会重新执行 11 步结算流程，已完成的步骤可能被覆盖。请确认该日数据无人工调整后再执行。',
       confirmText: '确认重跑',
       tone: 'danger',
+      confirmationText: `重跑日结 ${date}`,
     });
     if (!agreed) return;
     setBusy('settle');

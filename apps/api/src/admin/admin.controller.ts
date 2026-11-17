@@ -9,6 +9,7 @@ import { SettlementService } from '../settlement/settlement.service';
 import { TransferService } from '../transfer/transfer.service';
 import { UserService } from '../user/user.service';
 import { ApprovalService } from './approval.service';
+import { FinanceDashboardService } from './finance-dashboard.service';
 
 @Controller('api/admin')
 @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE', 'SUPPORT')
@@ -21,7 +22,14 @@ export class AdminController {
     private readonly settlement: SettlementService,
     private readonly transfer: TransferService,
     private readonly approvals: ApprovalService,
+    private readonly financeDashboard: FinanceDashboardService,
   ) {}
+
+  @Get('finance/dashboard')
+  @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE')
+  financeDashboardData(@Query('days') days = '30') {
+    return this.financeDashboard.dashboard(days);
+  }
 
   @Get('dashboard')
   @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE')
@@ -32,14 +40,13 @@ export class AdminController {
     const pendingApprovalWhere = current.role === 'OPERATOR'
       ? { status: 'PENDING', applicantId: current.id }
       : { status: 'PENDING' };
-    const [memberCount, todayOrders, todayPerformance, totalBonus, pendingWallet, pendingEquity, rankDistribution, recentOrders, pendingDeliveryOrders, pendingApprovals, pendingRiskEvents] =
+    const [memberCount, todayOrders, todayPerformance, totalBonus, pendingWallet, rankDistribution, recentOrders, pendingDeliveryOrders, pendingApprovals, pendingRiskEvents] =
       await Promise.all([
         this.prisma.user.count({ where: { role: 'MEMBER' } }),
         this.prisma.order.count({ where: { createdAt: { gte: today } } }),
         this.prisma.orderPerformance.aggregate({ where: { occurDate: today }, _sum: { amount: true } }),
         this.prisma.bonusRecord.aggregate({ _sum: { amount: true } }),
         this.prisma.walletTransfer.count({ where: { status: 'PENDING', riskFlag: 1 } }),
-        this.prisma.equityTransfer.count({ where: { status: 'PENDING', riskFlag: 1 } }),
         this.prisma.user.groupBy({ by: ['rankLevel'], _count: { _all: true }, orderBy: { rankLevel: 'asc' } }),
         this.prisma.order.findMany({
           orderBy: { createdAt: 'desc' },
@@ -56,7 +63,7 @@ export class AdminController {
       todayOrders,
       todayPerformance: todayPerformance._sum.amount ?? 0n,
       totalBonus: totalBonus._sum.amount ?? 0n,
-      pendingTransfers: canReviewOperations ? pendingWallet + pendingEquity : 0,
+      pendingTransfers: canReviewOperations ? pendingWallet : 0,
       pendingDeliveryOrders,
       pendingApprovals,
       pendingRiskEvents,
@@ -85,7 +92,7 @@ export class AdminController {
   memberRankOptions() {
     return this.prisma.rank.findMany({
       orderBy: { level: 'asc' },
-      select: { level: true, name: true, status: true },
+      select: { level: true, name: true, status: true, transferQuotaGrant: true },
     });
   }
 
@@ -277,42 +284,49 @@ export class AdminController {
     return this.featureFlags.toggle(code, body.enabled, body.platforms, body.minRankLevel, user.id);
   }
 
-  /** 虚拟货币发行总账：累计发行 / 流通 / 已消费或过期 / 沉淀 */
+  /** 钱包余额与权益通汇总 */
   @Get('reports/issuance')
   @Roles('SUPER_ADMIN', 'OPERATOR', 'FINANCE')
   async issuance() {
-    const [equityGranted, equityUsed, equityExpired, equityBalance, cashIn, cashOut, walletBalance, tokenTotal] =
+    const [quotaAccounts, cashIn, cashOut, walletBalance, tokenTotal] =
       await Promise.all([
-        this.prisma.equityAccount.aggregate({ _sum: { totalGranted: true } }),
-        this.prisma.equityAccount.aggregate({ _sum: { totalUsed: true } }),
-        this.prisma.equityAccount.aggregate({ _sum: { totalExpired: true } }),
-        this.prisma.equityAccount.aggregate({ _sum: { balance: true } }),
+        this.prisma.transferQuotaAccount.findMany({ select: { granted: true, adjustedOut: true, used: true, reserved: true } }),
         this.prisma.walletTransaction.aggregate({ where: { changeAmount: { gt: 0n } }, _sum: { changeAmount: true } }),
         this.prisma.walletTransaction.aggregate({ where: { changeAmount: { lt: 0n } }, _sum: { changeAmount: true } }),
         this.prisma.wallet.aggregate({ _sum: { balance: true, frozen: true } }),
-        this.prisma.tokenLot.aggregate({ _sum: { amount: true } }),
+        this.prisma.tokenAccount.aggregate({
+          where: { user: { is: { role: 'MEMBER' } } },
+          _sum: { totalGranted: true, balance: true, totalTransferIn: true, totalTransferOut: true },
+        }),
       ]);
 
-    const eqIssued = equityGranted._sum.totalGranted ?? 0n;
-    const eqCirculating = equityBalance._sum.balance ?? 0n;
-    const eqConsumed = (equityUsed._sum.totalUsed ?? 0n) + (equityExpired._sum.totalExpired ?? 0n);
+    const quotaGranted = quotaAccounts.reduce((sum, row) => sum + row.granted, 0n);
+    const quotaAdjustedOut = quotaAccounts.reduce((sum, row) => sum + row.adjustedOut, 0n);
+    const quotaUsed = quotaAccounts.reduce((sum, row) => sum + row.used, 0n);
+    const quotaReserved = quotaAccounts.reduce((sum, row) => sum + row.reserved, 0n);
+    const quotaAvailable = quotaAccounts.reduce((sum, row) => {
+      const available = row.granted - row.adjustedOut - row.used - row.reserved;
+      return sum + (available > 0n ? available : 0n);
+    }, 0n);
     const cashIssued = cashIn._sum.changeAmount ?? 0n;
     const cashCirculating = (walletBalance._sum.balance ?? 0n) + (walletBalance._sum.frozen ?? 0n);
 
     return {
-      equity: {
-        issued: eqIssued,
-        circulating: eqCirculating,
-        consumed: eqConsumed,
-        sunk: eqIssued - eqCirculating - eqConsumed,
-      },
+      transferQuota: { granted: quotaGranted, adjustedOut: quotaAdjustedOut, used: quotaUsed, reserved: quotaReserved, available: quotaAvailable },
       wallet: {
         issued: cashIssued,
         circulating: cashCirculating,
         consumed: -(cashOut._sum.changeAmount ?? 0n),
         sunk: cashIssued - cashCirculating + (cashOut._sum.changeAmount ?? 0n),
       },
-      token: { issued: tokenTotal._sum.amount ?? 0n, circulating: 0n, transferable: false },
+      token: {
+        issued: tokenTotal._sum.totalGranted ?? 0n,
+        circulating: tokenTotal._sum.balance ?? 0n,
+        transferIn: tokenTotal._sum.totalTransferIn ?? 0n,
+        transferOut: tokenTotal._sum.totalTransferOut ?? 0n,
+        transferable: true,
+        exchangeConnected: false,
+      },
     };
   }
 

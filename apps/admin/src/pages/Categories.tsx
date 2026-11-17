@@ -56,6 +56,17 @@ export function Categories() {
       notify('请填写分类名称', 'error');
       return;
     }
+    const previous = editing.id ? flat.find((item) => item.id === editing.id) : null;
+    if (previous?.status === 1 && Number(editing.status) === 0) {
+      const agreed = await confirm({
+        title: `确认停用分类「${editing.name}」？`,
+        description: '停用后该分类不会出现在会员端商城导航中。',
+        confirmText: '确认停用分类',
+        tone: 'danger',
+        confirmationText: `停用分类 ${editing.name}`,
+      });
+      if (!agreed) return;
+    }
     setSaving(true);
     try {
       if (editing.id) {
@@ -92,6 +103,7 @@ export function Categories() {
         : '删除后该分类将从商城导航移除，此操作不可撤销。',
       confirmText: '删除分类',
       tone: 'danger',
+      confirmationText: `删除 ${c.name}`,
     });
     if (!agreed) return;
     try {

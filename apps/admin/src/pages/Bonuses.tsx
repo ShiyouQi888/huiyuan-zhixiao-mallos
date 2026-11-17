@@ -6,6 +6,7 @@ import { BonusSettings } from './BonusSettings';
 import { Dividends } from './Dividends';
 import {
   Badge, Button, Card, Empty, ErrorBlock, Field, Modal, PageHeader, Pagination, StatCard, Tabs, TextInput, Toast,
+  useConfirm,
 } from '../components/ui';
 
 const BONUS_TYPES = [
@@ -39,6 +40,7 @@ export function Bonuses() {
   const [adjustAmount, setAdjustAmount] = useState('');
   const [adjustReason, setAdjustReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const { confirm, confirmNode } = useConfirm();
   const canAdjust = ['SUPER_ADMIN', 'OPERATOR'].includes(getAdminRole() ?? '');
   const canConfigure = getAdminRole() === 'SUPER_ADMIN';
   const [section, setSection] = useState<'records' | 'plans' | 'dividends' | 'settings'>('records');
@@ -81,6 +83,14 @@ export function Bonuses() {
   const submitAdjustment = async () => {
     const amount = Number(adjustAmount);
     if (!selectedMember || !Number.isSafeInteger(amount) || amount <= 0 || !adjustReason.trim()) return;
+    const agreed = await confirm({
+      title: '确认提交奖金调整？',
+      description: `${selectedMember.nickname ?? '该会员'} · ${fmtMoney(amount)}。原因：${adjustReason.trim()}。超管操作立即入账，运营操作进入财务复核。`,
+      confirmText: '确认提交调整',
+      tone: 'danger',
+      confirmationText: `调整奖金 ${selectedMember.nickname ?? selectedMember.phone ?? selectedMember.id} ${fmtMoney(amount)}`,
+    });
+    if (!agreed) return;
     setSaving(true);
     try {
       const result = await post<{ direct?: boolean }>('/admin/bonus/adjust', { userId: selectedMember.id, amount, reason: adjustReason.trim() });
@@ -149,7 +159,7 @@ export function Bonuses() {
         <div className="mb-4 grid gap-4 sm:grid-cols-3">
         <StatCard label="当前列表奖金总额" value={fmtMoney(totals.amount)} icon={<CircleDollarSign size={17} />} accent="brand" trend="仅统计当前页记录" />
         <StatCard label="钱包部分（70%）" value={fmtMoney(totals.cash)} icon={<Wallet size={17} />} accent="success" trend="可提现余额入账" />
-        <StatCard label="数权部分（30%）" value={fmtMoney(totals.token)} icon={<Coins size={17} />} accent="info" trend="权益值入账" />
+        <StatCard label="太阳值部分（30%）" value={fmtMoney(totals.token)} icon={<Coins size={17} />} accent="info" trend="太阳值账户入账" />
       </div>
 
       <Card className="overflow-hidden">
@@ -174,7 +184,7 @@ export function Bonuses() {
                   <th className="th">类型</th>
                   <th className="th text-right">奖金金额</th>
                   <th className="th text-right">现金 70%</th>
-                  <th className="th text-right">数权 30%</th>
+                  <th className="th text-right">太阳值 30%</th>
                   <th className="th">来源用户</th>
                   <th className="th">结算日</th>
                 </tr>
@@ -292,6 +302,7 @@ export function Bonuses() {
       )}
 
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
+      {confirmNode}
     </>
   );
 }

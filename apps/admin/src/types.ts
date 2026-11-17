@@ -27,12 +27,12 @@ export interface Member {
   inviteCode: string;
   rankLevel: number;
   packageId: number | null;
-  equityStatus: number;
+  transferQuotaStatus: number;
   status: number;
   totalTeamPerformance: number;
   createdAt: string;
-  wallet: { balance: number };
-  equityAccount: { balance: number };
+  wallet: { balance: number; frozen?: number };
+  transferQuotaAccount: { granted: number; adjustedOut: number; used: number; reserved: number };
 }
 
 export interface FeatureFlag {
@@ -44,6 +44,7 @@ export interface FeatureFlag {
   platforms: string[];
   minRankLevel: number;
   updatedAt: string;
+  locked?: boolean;
 }
 
 export interface SettleBatch {

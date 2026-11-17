@@ -9,7 +9,7 @@ export interface LotUsage {
   expireAt: Date;
 }
 
-/** 权益值：批次（lot）模型 + FIFO 扣减 + 转让继承最早到期日 */
+/** 旧版权益账本服务：保留历史记录与未完结旧转账兼容；新业务使用 TransferQuotaService。 */
 @Injectable()
 export class EquityService {
   constructor(private readonly prisma: PrismaService) {}
@@ -140,7 +140,7 @@ export class EquityService {
   ): Promise<{ usages: LotUsage[]; earliestExpireAt: Date }> {
     const usages = await this.deductFIFO(fromId, amount, 'equity_transfer_out', transferNo, 4);
     if (!usages.length) throw new BusinessException(3001, '权益值余额不足');
-    // 权益值 = 转账/可转出额度：转出后额度归零即视为用完，标记暂停计酬（等待复消恢复）
+    // Legacy transfer history only. New wallet transfers use the separate transfer-quota account.
     await this.markSuspendIfExhausted(fromId);
     const earliestExpireAt = usages.reduce(
       (min, u) => (u.expireAt < min ? u.expireAt : min),
@@ -166,13 +166,11 @@ export class EquityService {
     });
   }
 
-  /** 额度用完（余额归零）→ 标记暂停计酬，等待复消恢复 */
+  /** Legacy no-op; transfer quota does not change bonus eligibility. */
   async markSuspendIfExhausted(userId: bigint, transaction?: Prisma.TransactionClient): Promise<void> {
-    const tx = transaction ?? this.prisma;
-    const account = await tx.equityAccount.findUnique({ where: { userId } });
-    if (account && account.balance <= 0n) {
-      await tx.user.updateMany({ where: { id: userId }, data: { equityStatus: 1 } });
-    }
+    // Legacy compatibility only. The former equity points are no longer a compensation status.
+    void userId;
+    void transaction;
   }
 
   /** 转账超时/拒绝：把冻结的批次还回去（到期日不变，不延长平台负债） */
@@ -204,9 +202,6 @@ export class EquityService {
         data: { userId: fromId, type: 5, changeAmount: amount, balanceAfter, bizType: 'equity_transfer_refund', bizId: transferNo },
       });
       // 额度随退款恢复：若此前因「额度用完」被标记暂停计酬，此处解除（暂停只由额度耗尽触发）
-      if (balanceAfter > 0n) {
-        await tx.user.updateMany({ where: { id: fromId, equityStatus: 1 }, data: { equityStatus: 0 } });
-      }
     });
   }
 
@@ -254,10 +249,8 @@ export class EquityService {
 
   /** 只对已购买礼包的会员生效；普通用户不参与计酬状态机 */
   async setEquityStatus(userId: bigint, status: 0 | 1): Promise<void> {
-    await this.prisma.user.updateMany({
-      where: { id: userId, packageId: { not: null } },
-      data: { equityStatus: status },
-    });
+    void userId;
+    void status;
   }
 
   async transactions(userId: bigint, page = 1, pageSize = 20) {

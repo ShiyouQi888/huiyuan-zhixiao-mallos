@@ -3,7 +3,7 @@ import { CheckCircle2, ClipboardCheck, XCircle } from 'lucide-react';
 import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
 import {
   Badge, Button, Card, Empty, ErrorBlock, Field, KeyValue, LoadingBlock, Modal, PageHeader, Pagination,
-  Tabs, TextInput, Toast,
+  Tabs, TextInput, Toast, useConfirm,
 } from '../components/ui';
 
 const TYPE_NAMES: Record<string, string> = {
@@ -32,6 +32,7 @@ export function Approvals() {
   const [selectedApproval, setSelectedApproval] = useState<any>(null);
   const [reviewRemark, setReviewRemark] = useState('');
   const [reviewBusy, setReviewBusy] = useState(false);
+  const { confirm, confirmNode } = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,6 +55,15 @@ export function Approvals() {
       setToast('拒绝申请时请填写处理原因');
       return;
     }
+    const approval = list.find((item) => item.id === id) ?? selectedApproval;
+    const agreed = await confirm({
+      title: pass ? '确认通过该申请？' : '确认拒绝该申请？',
+      description: `${TYPE_NAMES[approval?.type] ?? '业务申请'} · ${approval?.applicant?.nickname ?? approval?.applicant?.phone ?? '申请人'}。${pass ? '通过后会立即执行对应业务变更。' : `拒绝原因：${reviewRemark.trim()}`}`,
+      confirmText: pass ? '确认通过并执行' : '确认拒绝申请',
+      tone: pass ? 'primary' : 'danger',
+      confirmationText: `${pass ? '通过' : '拒绝'}申请 ${approval?.id ?? id}`,
+    });
+    if (!agreed) return;
     setReviewBusy(true);
     try {
       await post(`/admin/approvals/${id}/review`, { pass, remark: reviewRemark.trim() || '复核通过' });
@@ -244,6 +254,7 @@ export function Approvals() {
       </Modal>
 
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
+      {confirmNode}
     </>
   );
 }

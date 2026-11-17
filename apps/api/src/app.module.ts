@@ -28,6 +28,7 @@ import { SettlementService } from './settlement/settlement.service';
 import { TasksService } from './tasks/tasks.service';
 import { TokenModule } from './token/token.module';
 import { TransferModule } from './transfer/transfer.module';
+import { TransferQuotaModule } from './transfer-quota/transfer-quota.module';
 import { UserModule } from './user/user.module';
 import { WalletModule } from './wallet/wallet.module';
 
@@ -50,6 +51,7 @@ import { WalletModule } from './wallet/wallet.module';
     UserModule,
     OrderModule,
     TransferModule,
+    TransferQuotaModule,
     AdminModule,
   ],
   controllers: [AuthController, MemberController, OrderController, AdminController, AdminExtendedController, AdminMemberController, OperatorAccountsController],

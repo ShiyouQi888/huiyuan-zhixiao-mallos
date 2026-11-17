@@ -1,7 +1,7 @@
 // 太阳线会员系统 · 数据模型
 // 口径来源：docs/太阳线会员系统-完整架构文档.md
 // 金额统一以「元」为单位的整数存储在 BIGINT 中。
-// 系统无退款、无提现，故不设 order_refunds / withdrawals 表。
+// 系统不接外部提现渠道；权益通按档位发放，约束钱包转出并随商城钱包消费递减。
 
 generator client {
   provider = "prisma-client-js"
@@ -42,8 +42,8 @@ model User {
   path                 String    @default(",")
   depth                Int       @default(0)
 
-  /// 0 正常计酬 1 暂停计酬
-  equityStatus         Int       @default(0) @db.SmallInt
+  /// 0 尚有权益通 1 权益通已用完；不影响收益结算
+  transferQuotaStatus  Int       @default(0) @db.SmallInt
   /// 平级奖历史锁定：首次满足「上级等级 <= 下级等级」即永久置位
   peerBonusLocked      Boolean   @default(false)
   peerBonusLockedAt    DateTime?
@@ -94,6 +94,8 @@ model User {
   tokenTransactions    TokenTransaction[]
   tokenTransfersFrom   TokenTransfer[]     @relation("TokenTransferFrom")
   tokenTransfersTo     TokenTransfer[]     @relation("TokenTransferTo")
+  transferQuotaAccount TransferQuotaAccount?
+  transferQuotaTransactions TransferQuotaTransaction[]
   riskEvents           RiskEvent[]
 
   @@index([parentId])
@@ -102,7 +104,7 @@ model User {
   // 伞下查询用 LIKE '%,id,%'（contains）本就全表扫描，startsWith 亦为低频管理操作。
   @@index([depth])
   @@index([rankId])
-  @@index([equityStatus])
+  @@index([transferQuotaStatus])
   @@index([createdAt])
 }
 
@@ -147,8 +149,14 @@ model Package {
   name         String   @db.VarChar(64)
   level        Int      @unique
   price        BigInt
-  equityValue  BigInt
+  transferQuota BigInt
   durationDays Int      @default(365)
+  /// 为空时继承全局 bonus.reward_rate；以比例存储，如 1.0 = 100%
+  directRewardRate     Decimal? @db.Decimal(5, 4)
+  /// 为空时继承全局 bonus.repurchase_rate
+  repurchaseRewardRate Decimal? @db.Decimal(5, 4)
+  /// 为空时继承全局 bonus.direct_periods
+  directReleaseDays    Int?
   items        Json     @default("[]")
   /// 0 停用 1 启用
   status       Int      @default(1) @db.SmallInt
@@ -399,6 +407,36 @@ model EquityTransfer {
 // 奖金
 // ============================================================
 
+model TransferQuotaAccount {
+  userId    BigInt   @id
+  granted   BigInt   @default(0)
+  adjustedOut BigInt @default(0)
+  used      BigInt   @default(0)
+  reserved  BigInt   @default(0)
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model TransferQuotaTransaction {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt
+  /// 1 档位发放 2 转账预占 3 拒绝/超时返还 4 钱包转出确认 5 人工调整 6 商城钱包消费
+  type         Int      @db.SmallInt
+  changeAmount BigInt
+  balanceAfter BigInt
+  bizType      String   @db.VarChar(64)
+  bizId        String   @db.VarChar(64)
+  remark       String?  @db.VarChar(256)
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@unique([bizType, bizId])
+  @@index([userId, createdAt])
+}
+
 model BonusPlan {
   id              BigInt   @id @default(autoincrement())
   orderId         BigInt   @unique
@@ -490,6 +528,8 @@ model Rank {
   level       Int      @unique
   /// 团队累计业绩门槛（元）
   threshold   BigInt
+  /// 手工晋升到此等级时新增的权益通额度（元）
+  transferQuotaGrant BigInt @default(0)
   /// 团队奖费率
   teamRate    Decimal  @db.Decimal(5, 4)
   /// 分红池比例
@@ -551,7 +591,7 @@ model Dividend {
 }
 
 // ============================================================
-// 钱包与数权
+// 钱包与太阳值
 // ============================================================
 
 model Wallet {

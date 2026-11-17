@@ -4,7 +4,7 @@ import {
   effectiveTeamBase,
   judgeRank,
   perCapita,
-  selectGlobalExcludedLine,
+  selectMaxExcludedLines,
   shouldLockPeer,
   splitBonus,
   type AggUser,
@@ -15,7 +15,6 @@ const u = (id: number, parentId: number | null, depth: number, rankLevel = 0): A
   parentId: parentId === null ? null : BigInt(parentId),
   depth,
   rankLevel,
-  equityStatus: 0,
   peerBonusLocked: false,
 });
 
@@ -110,7 +109,7 @@ describe('平级奖历史锁定', () => {
   });
 });
 
-describe('团队奖全局最大线剔除 selectGlobalExcludedLine', () => {
+describe('团队奖每位会员最大推广线剔除 selectMaxExcludedLines', () => {
   const tree = (entries: Array<[number, number, number]>) => {
     // [parentId, childId, teamAmount]
     const map = new Map<bigint, Array<{ id: bigint; teamAmount: bigint }>>();
@@ -122,42 +121,48 @@ describe('团队奖全局最大线剔除 selectGlobalExcludedLine', () => {
     return map;
   };
 
-  it('全局只剔除一条：取整张网中业绩最大的直推线', () => {
-    // 上级 1 的最大线 40000；上级 2 的最大线 120000 → 全局取后者
+  it('每位上级分别剔除自己的最大直推线', () => {
     const children = tree([
       [1, 11, 20000], [1, 12, 40000],
       [2, 21, 80000], [2, 22, 120000],
     ]);
-    expect(selectGlobalExcludedLine(children, 0)).toEqual({ parentId: 2n, childId: 22n, amount: 120000n });
+    expect(selectMaxExcludedLines(children, 0)).toEqual(new Map([
+      [1n, { parentId: 1n, childId: 12n, amount: 40000n }],
+      [2n, { parentId: 2n, childId: 22n, amount: 120000n }],
+    ]));
   });
 
   it('直接下线少于 2 条的上级不参与候选（单线独苗不剔除）', () => {
     const children = tree([[1, 11, 50000], [2, 21, 10000]]);
-    expect(selectGlobalExcludedLine(children, 0)).toBeNull();
+    expect(selectMaxExcludedLines(children, 0)).toEqual(new Map());
   });
 
-  it('占比未超过阈值时该线不参与候选', () => {
-    // 上级 1：最大线 50000/100000 = 50%，未超 60%
-    // 上级 2：最大线 70000/100000 = 70% > 60%
+  it('仅剔除超过各自占比阈值的最大线', () => {
+    // 上级 1：最大线 50%，未超 60%；上级 2：最大线 70%，超过 60%
     const children = tree([
       [1, 11, 50000], [1, 12, 50000],
       [2, 21, 70000], [2, 22, 30000],
     ]);
-    expect(selectGlobalExcludedLine(children, 0.6)).toEqual({ parentId: 2n, childId: 21n, amount: 70000n });
+    expect(selectMaxExcludedLines(children, 0.6)).toEqual(new Map([
+      [2n, { parentId: 2n, childId: 21n, amount: 70000n }],
+    ]));
   });
 
-  it('业绩并列时取 parentId / childId 较小者，保证结果确定', () => {
+  it('同一上级业绩并列时取 childId 较小者，保证结果确定', () => {
     const children = tree([
       [2, 21, 100000], [2, 22, 100000],
       [1, 11, 100000], [1, 12, 100000],
     ]);
-    expect(selectGlobalExcludedLine(children, 0)).toEqual({ parentId: 1n, childId: 11n, amount: 100000n });
+    expect(selectMaxExcludedLines(children, 0)).toEqual(new Map([
+      [2n, { parentId: 2n, childId: 21n, amount: 100000n }],
+      [1n, { parentId: 1n, childId: 11n, amount: 100000n }],
+    ]));
   });
 
-  it('无满足条件的上级时返回 null', () => {
-    expect(selectGlobalExcludedLine(new Map(), 0)).toBeNull();
+  it('无满足条件的上级时返回空映射', () => {
+    expect(selectMaxExcludedLines(new Map(), 0)).toEqual(new Map());
     const children = tree([[1, 11, 0], [1, 12, 0]]);
-    expect(selectGlobalExcludedLine(children, 0)).toBeNull();
+    expect(selectMaxExcludedLines(children, 0)).toEqual(new Map());
   });
 });
 

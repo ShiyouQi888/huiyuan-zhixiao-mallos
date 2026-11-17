@@ -4,6 +4,8 @@ import { Err } from '../common/business.exception';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RelationService } from '../relation/relation.service';
+import { TransferQuotaService } from '../transfer-quota/transfer-quota.service';
+import { decryptPii, encryptPii, normalizeChineseIdCard } from '../common/pii-crypto';
 
 export interface AddressInput {
   receiver: string;
@@ -27,12 +29,13 @@ export class UserService {
     private readonly prisma: PrismaService,
     private readonly relation: RelationService,
     private readonly redis: RedisService,
+    private readonly transferQuota: TransferQuotaService,
   ) {}
 
   async me(userId: bigint) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { rank: true, package: true, wallet: true, equityAccount: true },
+      include: { rank: true, package: true },
     });
     if (!user) throw Err.notFound('用户不存在');
     const { passwordHash, transferPasswordHash, idCardEncrypted, ...safe } = user;
@@ -102,10 +105,57 @@ export class UserService {
   }
 
   async realname(userId: bigint, realName: string, idCard: string) {
-    return this.prisma.user.update({
+    const name = typeof realName === 'string' ? realName.trim() : '';
+    if (name.length < 2 || name.length > 64) throw Err.param('真实姓名长度须为 2 至 64 个字符');
+    const normalizedId = normalizeChineseIdCard(idCard);
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { realNameStatus: true } });
+    if (!user) throw Err.notFound('用户不存在');
+    if (user.realNameStatus === 1) throw Err.conflict('该账号已完成实名认证');
+    if (user.realNameStatus === 2) throw Err.conflict('实名认证正在审核中');
+    await this.prisma.user.update({
       where: { id: userId },
-      data: { realNameStatus: 1, realName, idCardEncrypted: Buffer.from(idCard).toString('base64') },
+      data: { realNameStatus: 2, realName: name, idCardEncrypted: encryptPii(normalizedId) },
     });
+    return { realNameStatus: 2, submitted: true };
+  }
+
+  async realnameReview(userId: bigint, approved: boolean, operatorId: bigint, remark?: string) {
+    if (typeof approved !== 'boolean') throw Err.param('审核结果无效');
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true, role: true, realNameStatus: true } });
+      if (!user || user.role !== 'MEMBER') throw Err.notFound('会员不存在');
+      if (user.realNameStatus !== 2) throw Err.conflict('该实名认证申请已处理或不在待审核状态');
+      const status = approved ? 1 : 3;
+      await tx.user.update({ where: { id: userId }, data: { realNameStatus: status } });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId,
+          action: approved ? 'REALNAME_APPROVED' : 'REALNAME_REJECTED',
+          targetType: 'USER', targetId: userId,
+          before: { realNameStatus: 2 } as never,
+          after: { realNameStatus: status, remark: remark?.trim().slice(0, 255) || null } as never,
+        },
+      });
+      return { userId, realNameStatus: status };
+    });
+  }
+
+  async realnameAdminView(userId: bigint) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { realName: true, idCardEncrypted: true, realNameStatus: true },
+    });
+    if (!user) throw Err.notFound('会员不存在');
+    let maskedIdCard: string | null = null;
+    if (user.idCardEncrypted) {
+      try {
+        const idCard = decryptPii(user.idCardEncrypted);
+        maskedIdCard = `${idCard.slice(0, 3)}***********${idCard.slice(-4)}`;
+      } catch {
+        maskedIdCard = '证件信息无法解密';
+      }
+    }
+    return { realName: user.realName, maskedIdCard, realNameStatus: user.realNameStatus };
   }
 
   async addresses(userId: bigint) {
@@ -183,6 +233,38 @@ export class UserService {
     return { transferPasswordSet: true };
   }
 
+  async resetTransferPassword(userId: bigint, realName: string, idCard: string, newPassword: string) {
+    if (!/^\d{6}$/.test(newPassword ?? '')) throw Err.param('转账支付密码必须为 6 位数字');
+    const normalizedId = normalizeChineseIdCard(idCard);
+    const attemptsKey = `security:transfer-password-reset:${userId}`;
+    const attempts = Number(await this.redis.get(attemptsKey) ?? 0);
+    if (attempts >= 5) throw Err.param('身份核验失败次数过多，请 15 分钟后重试');
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { realName: true, realNameStatus: true, idCardEncrypted: true },
+    });
+    let matches = false;
+    try {
+      matches = user?.realNameStatus === 1
+        && user.realName?.trim() === realName?.trim()
+        && !!user.idCardEncrypted
+        && decryptPii(user.idCardEncrypted) === normalizedId;
+    } catch {
+      matches = false;
+    }
+    if (!matches) {
+      const client = this.redis.getClient();
+      const failures = await client.incr(attemptsKey);
+      if (failures === 1) await client.expire(attemptsKey, 900);
+      throw Err.forbidden(failures >= 5 ? '身份核验失败次数过多，请 15 分钟后重试' : '身份信息不匹配，请核实后重试');
+    }
+    await this.redis.del(attemptsKey);
+    const transferPasswordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({ where: { id: userId }, data: { transferPasswordHash } });
+    await this.redis.del(`security:transfer-password:${userId}`);
+    return { transferPasswordSet: true };
+  }
+
   async verifyTransferPassword(userId: bigint, password: string) {
     if (typeof password !== 'string' || !/^\d{6}$/.test(password)) throw Err.param('请输入 6 位转账支付密码');
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { transferPasswordHash: true } });
@@ -246,9 +328,9 @@ export class UserService {
         take: pageSize,
         select: {
           id: true, phone: true, nickname: true, inviteCode: true, rankLevel: true,
-          packageId: true, equityStatus: true, status: true, totalTeamPerformance: true, createdAt: true,
-          wallet: { select: { balance: true } },
-          equityAccount: { select: { balance: true } },
+          packageId: true, transferQuotaStatus: true, status: true, totalTeamPerformance: true, createdAt: true,
+          wallet: { select: { balance: true, frozen: true } },
+          transferQuotaAccount: { select: { granted: true, adjustedOut: true, used: true, reserved: true } },
         },
       }),
       this.prisma.user.count({ where }),
@@ -262,11 +344,36 @@ export class UserService {
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUnique({ where: { id: userId } });
       if (!user || user.role !== 'MEMBER' || user.status === 2) throw Err.notFound('会员不存在');
-      await tx.user.update({ where: { id: userId }, data: { rankId: rank.id, rankLevel: rank.level, rankAchievedAt: new Date() } });
-      await tx.rankLog.create({
+      if (user.rankLevel === rank.level) return { userId, level: rank.level, quotaGranted: 0n };
+      const changed = await tx.user.updateMany({
+        where: { id: userId, rankLevel: user.rankLevel },
+        data: { rankId: rank.id, rankLevel: rank.level, rankAchievedAt: new Date() },
+      });
+      if (!changed.count) throw Err.conflict('会员等级刚刚发生变化，请刷新后重试');
+      const rankLog = await tx.rankLog.create({
         data: { userId, fromLevel: user.rankLevel, toLevel: rank.level, totalPerformance: user.totalTeamPerformance, triggerType: 'MANUAL' },
       });
-      return { userId, level: rank.level };
+      let quotaGranted = 0n;
+      if (rank.level > user.rankLevel) {
+        const crossedRanks = await tx.rank.findMany({
+          where: { level: { gt: user.rankLevel, lte: rank.level }, status: 1 },
+          orderBy: { level: 'asc' },
+          select: { transferQuotaGrant: true },
+        });
+        quotaGranted = crossedRanks.reduce((total, item) => total + item.transferQuotaGrant, 0n);
+        if (quotaGranted > 0n) {
+          await this.transferQuota.grant(
+            userId,
+            quotaGranted,
+            'manual_rank_adjustment',
+            rankLog.id.toString(),
+            `后台调级晋升至${rank.name}，新增权益通`,
+            tx,
+            5,
+          );
+        }
+      }
+      return { userId, level: rank.level, quotaGranted };
     });
   }
 

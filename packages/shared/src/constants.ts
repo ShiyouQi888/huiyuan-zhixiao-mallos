@@ -24,7 +24,6 @@ export const ErrorCode = {
   TRANSFER_EXPIRED: 3004,
   ALREADY_ACCEPTED: 3005,
   RISK_REJECTED: 3006,
-  EQUITY_STATUS_SUSPENDED: 3007,
   // 4001-4099 资源不存在
   USER_NOT_FOUND: 4001,
   PACKAGE_NOT_FOUND: 4002,
@@ -57,25 +56,20 @@ export const BonusType = {
   DIVIDEND: 5,     // 分红池
 } as const;
 
-export const EquityStatus = {
-  ACTIVE: 0,       // 正常计酬
-  SUSPENDED: 1,    // 暂停计酬
-} as const;
-
 /* ---------------- 档位初始化数据 ---------------- */
 export interface PackageSeed {
   level: number;
   name: string;
   price: number;
-  equityValue: number;
+  transferQuota: number;
   durationDays: number;
 }
 
 export const PACKAGE_SEEDS: PackageSeed[] = [
-  { level: 1, name: '银卡', price: 2000, equityValue: 6000, durationDays: 365 },
-  { level: 2, name: '金卡', price: 5000, equityValue: 15000, durationDays: 365 },
-  { level: 3, name: '钻卡', price: 10000, equityValue: 30000, durationDays: 365 },
-  { level: 4, name: '至尊卡', price: 20000, equityValue: 60000, durationDays: 365 },
+  { level: 1, name: '银卡', price: 2000, transferQuota: 6000, durationDays: 365 },
+  { level: 2, name: '金卡', price: 5000, transferQuota: 15000, durationDays: 365 },
+  { level: 3, name: '钻卡', price: 10000, transferQuota: 30000, durationDays: 365 },
+  { level: 4, name: '至尊卡', price: 20000, transferQuota: 60000, durationDays: 365 },
 ];
 
 /* ---------------- 等级初始化数据 ---------------- */
@@ -104,9 +98,8 @@ export const CONFIG_SEEDS: Record<string, { value: unknown; group: string; descr
   'bonus.peer_rate':          { value: 1.0,  group: 'bonus',    description: '平级奖比例' },
   'bonus.leader_rate':        { value: 0.5,  group: 'bonus',    description: '领导奖比例' },
   'bonus.cash_ratio':         { value: 0.7,  group: 'bonus',    description: '奖金拆分到钱包比例' },
-  'bonus.token_ratio':        { value: 0.3,  group: 'bonus',    description: '奖金拆分到数权比例' },
+  'bonus.token_ratio':        { value: 0.3,  group: 'bonus',    description: '奖金拆分到太阳值比例' },
   'bonus.direct_periods':     { value: 20,   group: 'bonus',    description: '直推奖释放期数' },
-  'equity.expire_months':     { value: 12,   group: 'equity',   description: '权益值有效期（月）' },
   'transfer.enabled':         { value: true, group: 'transfer', description: '转账总开关' },
   'transfer.limit':           { value: 0,    group: 'transfer', description: '单笔转账限额，0=不限' },
   'transfer.accept_timeout_hours': { value: 24, group: 'transfer', description: '转账确认超时（小时）' },
@@ -124,11 +117,10 @@ export const FEATURE_FLAG_SEEDS = [
   { code: 'referral.center',    name: '推广中心',     module: 'referral' },
   { code: 'team.view',          name: '团队查看',     module: 'team' },
   { code: 'bonus.detail',       name: '收益明细',     module: 'bonus' },
-  { code: 'equity.account',     name: '权益值账户',   module: 'equity' },
-  { code: 'equity.transfer',    name: '权益值转账',   module: 'equity' },
+  { code: 'wallet.transfer_quota', name: '权益通', module: 'wallet' },
   { code: 'wallet.account',     name: '钱包余额',     module: 'wallet' },
   { code: 'wallet.transfer',    name: '余额转账',     module: 'wallet' },
-  { code: 'token.view',         name: '数权查看',     module: 'token' },
+  { code: 'token.view',         name: '太阳值查看',   module: 'token' },
   { code: 'rank.dividend',      name: '分红池明细',   module: 'rank' },
   { code: 'notify.subscribe',   name: '消息订阅',     module: 'notify' },
   { code: 'realname',           name: '实名认证',     module: 'user' },
@@ -138,8 +130,7 @@ export const FEATURE_FLAG_SEEDS = [
 /* ---------------- 业务参数 ---------------- */
 export const DIRECT_PERIODS = 20;          // 直推奖分 20 期
 export const CASH_RATIO = 0.7;              // 奖金 70% 进钱包
-export const TOKEN_RATIO = 0.3;             // 奖金 30% 进数权
+export const TOKEN_RATIO = 0.3;             // 奖金 30% 进太阳值
 export const TRANSFER_TIMEOUT_HOURS = 24;   // 转账确认超时
-export const EQUITY_EXPIRE_MONTHS = 12;     // 权益值有效期
 export const DAILY_SETTLE_HOUR = 2;         // 日结时间
 export const RECONCILE_HOUR = 4;            // 对账时间

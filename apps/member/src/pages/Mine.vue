@@ -13,17 +13,17 @@ const showRealname = ref(false);
 const realName = ref('');
 const idCard = ref('');
 const canSeeWallet = computed(() => store.has('wallet.account'));
-const canSeeEquity = computed(() => store.has('equity.account'));
-const canSeeAssets = computed(() => canSeeWallet.value || canSeeEquity.value || store.has('token.view'));
+const canSeeTransferQuota = computed(() => store.has('wallet.transfer_quota'));
+const canSeeAssets = computed(() => canSeeWallet.value || canSeeTransferQuota.value || store.has('token.view'));
 
 onMounted(() => store.loadProfile().catch(() => {}));
 
 async function submitRealname() {
   try {
     await api('/me/realname', { method: 'POST', body: { realName: realName.value, idCard: idCard.value } });
-    if (store.profile) store.profile.realNameStatus = 1;
+    if (store.profile) store.profile.realNameStatus = 2;
     showRealname.value = false;
-    Toast('实名认证成功', 'success');
+    Toast('实名认证申请已提交，审核通过后即可使用相关功能', 'success');
   } catch (e: any) { Toast(e.message, 'danger'); }
 }
 
@@ -49,6 +49,7 @@ function logout() {
       <div class="profile-hero-top">
         <span class="profile-hero-label">会员账户</span>
         <span v-if="store.profile?.realNameStatus === 1" class="verified-tag"><BadgeCheck :size="13" aria-hidden="true" />已实名</span>
+        <span v-else-if="store.profile?.realNameStatus === 2" class="verified-tag">审核中</span>
       </div>
       <div class="profile-main">
         <div class="profile-avatar">
@@ -73,16 +74,16 @@ function logout() {
       <ArrowRight :size="17" aria-hidden="true" />
     </button>
 
-    <div v-if="canSeeAssets && (canSeeWallet || canSeeEquity)" class="profile-assets" :class="{ 'profile-assets--single': canSeeWallet !== canSeeEquity }">
+    <div v-if="canSeeAssets && (canSeeWallet || canSeeTransferQuota)" class="profile-assets" :class="{ 'profile-assets--single': canSeeWallet !== canSeeTransferQuota }">
       <button v-if="canSeeWallet" type="button" class="profile-asset-card" @click="router.push('/assets')">
         <span class="profile-asset-icon"><WalletCards :size="17" aria-hidden="true" /></span>
         <div>
           <small>钱包余额</small><strong>¥{{ money(store.profile?.wallet?.balance) }}</strong>
         </div>
       </button>
-      <button v-if="canSeeEquity" type="button" class="profile-asset-card profile-asset-card--equity" @click="router.push('/assets')">
+      <button v-if="canSeeTransferQuota" type="button" class="profile-asset-card profile-asset-card--quota" @click="router.push('/assets')">
         <span class="profile-asset-icon"><BadgeCheck :size="17" aria-hidden="true" /></span>
-        <div><small>可用权益值</small><strong>{{ money(store.profile?.equityAccount?.balance) }}</strong></div>
+        <div><small>可用权益通</small><strong>{{ money(store.profile?.transferQuotaAccount?.available) }}</strong></div>
       </button>
     </div>
 
@@ -91,16 +92,16 @@ function logout() {
       <router-link v-if="canSeeAssets" to="/assets" class="account-menu-item"><span class="account-menu-icon"><WalletCards :size="17" aria-hidden="true" /></span><span>资产中心</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
       <router-link v-if="store.has('address.manage')" to="/addresses" class="account-menu-item"><span class="account-menu-icon"><MapPin :size="17" aria-hidden="true" /></span><span>收货地址</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
       <router-link v-if="store.has('transfer.password')" to="/security/transfer-password" class="account-menu-item"><span class="account-menu-icon"><KeyRound :size="17" aria-hidden="true" /></span><span>转账支付密码</span><span class="account-menu-status">{{ store.profile?.transferPasswordSet ? '已设置' : '未设置' }}</span><ChevronRight :size="16" aria-hidden="true" /></router-link>
-      <button v-if="store.has('realname')" type="button" class="account-menu-item" :disabled="store.profile?.realNameStatus === 1" @click="showRealname = true">
+      <button v-if="store.has('realname')" type="button" class="account-menu-item" :disabled="store.profile?.realNameStatus === 1 || store.profile?.realNameStatus === 2" @click="showRealname = true">
         <span class="account-menu-icon"><ShieldCheck :size="17" aria-hidden="true" /></span><span>实名认证</span>
-        <span class="account-menu-status">{{ store.profile?.realNameStatus === 1 ? '已完成' : '立即认证' }}</span><ChevronRight :size="16" aria-hidden="true" />
+        <span class="account-menu-status">{{ store.profile?.realNameStatus === 1 ? '已完成' : store.profile?.realNameStatus === 2 ? '审核中' : store.profile?.realNameStatus === 3 ? '未通过，重新提交' : '立即认证' }}</span><ChevronRight :size="16" aria-hidden="true" />
       </button>
     </nav>
 
     <t-button theme="danger" variant="outline" block class="logout-button" @click="logout">退出登录</t-button>
 
     <AppModal v-if="store.has('realname')" v-model="showRealname" eyebrow="身份核验" title="实名认证"
-      description="完成实名后可进行转账、购买与提现等操作。" confirm-text="提交认证"
+      description="完成实名并经平台审核后可使用会员转账等功能。" confirm-text="提交认证"
       hint="身份信息仅用于核验，平台将严格保密。" @confirm="submitRealname">
       <label class="app-field"><span>真实姓名</span><input v-model="realName" class="input" autocomplete="name" placeholder="请输入真实姓名" /></label>
       <label class="app-field"><span>身份证号</span><input v-model="idCard" class="input" autocomplete="off" placeholder="请输入身份证号" /></label>
@@ -161,7 +162,7 @@ function logout() {
 .profile-assets--single { grid-template-columns: 1fr; }
 .profile-asset-card { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 13px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text); text-align: left; box-shadow: var(--shadow-card); cursor: pointer; }
 .profile-asset-icon { display: flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 11px; background: var(--brand-soft); color: var(--brand); }
-.profile-asset-card--equity .profile-asset-icon { background: var(--green-soft); color: var(--green); }
+.profile-asset-card--quota .profile-asset-icon { background: var(--green-soft); color: var(--green); }
 .profile-asset-card div { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
 .profile-asset-card small { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .profile-asset-card strong { overflow: hidden; font-family: var(--font-num); font-size: 16px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }

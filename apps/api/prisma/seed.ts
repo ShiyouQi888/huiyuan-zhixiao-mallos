@@ -20,10 +20,10 @@ const RANKS = [
 ];
 
 const PACKAGES = [
-  { id: 1, level: 1, name: '银卡', price: 2000n, equityValue: 6000n, durationDays: 365, sort: 1, items: [{ name: '银卡礼包', quantity: 1 }] },
-  { id: 2, level: 2, name: '金卡', price: 5000n, equityValue: 15000n, durationDays: 365, sort: 2, items: [{ name: '金卡礼包', quantity: 1 }] },
-  { id: 3, level: 3, name: '钻卡', price: 10000n, equityValue: 30000n, durationDays: 365, sort: 3, items: [{ name: '钻卡礼包', quantity: 1 }] },
-  { id: 4, level: 4, name: '至尊卡', price: 20000n, equityValue: 60000n, durationDays: 365, sort: 4, items: [{ name: '至尊卡礼包', quantity: 1 }] },
+  { id: 1, level: 1, name: '银卡', price: 2000n, transferQuota: 6000n, durationDays: 365, sort: 1, items: [{ name: '银卡礼包', quantity: 1 }] },
+  { id: 2, level: 2, name: '金卡', price: 5000n, transferQuota: 15000n, durationDays: 365, sort: 2, items: [{ name: '金卡礼包', quantity: 1 }] },
+  { id: 3, level: 3, name: '钻卡', price: 10000n, transferQuota: 30000n, durationDays: 365, sort: 3, items: [{ name: '钻卡礼包', quantity: 1 }] },
+  { id: 4, level: 4, name: '至尊卡', price: 20000n, transferQuota: 60000n, durationDays: 365, sort: 4, items: [{ name: '至尊卡礼包', quantity: 1 }] },
 ];
 
 const CONFIGS: Array<{ key: string; value: unknown; group: string; description: string }> = [
@@ -32,16 +32,15 @@ const CONFIGS: Array<{ key: string; value: unknown; group: string; description: 
   { key: 'bonus.peer_rate', value: 1.0, group: 'bonus', description: '平级奖比例' },
   { key: 'bonus.leader_rate', value: 0.5, group: 'bonus', description: '领导奖比例' },
   { key: 'bonus.cash_ratio', value: 0.7, group: 'bonus', description: '奖金拆分到钱包比例' },
-  { key: 'bonus.token_ratio', value: 0.3, group: 'bonus', description: '奖金拆分到数权比例' },
+  { key: 'bonus.token_ratio', value: 0.3, group: 'bonus', description: '奖金拆分到太阳值比例' },
   { key: 'bonus.direct_periods', value: 20, group: 'bonus', description: '直推奖释放期数' },
-  { key: 'bonus.team_exclude_enabled', value: true, group: 'bonus', description: '团队奖是否剔除业绩最大的一条直推线（含其领导奖/平级奖）' },
-  { key: 'bonus.team_exclude_ratio', value: 0, group: 'bonus', description: '剔除最大线的占比阈值，0=无条件剔除（仅需直接下线≥2条）' },
-  { key: 'equity.expire_months', value: 12, group: 'equity', description: '权益值有效期（月）' },
+  { key: 'bonus.team_exclude_enabled', value: true, group: 'bonus', description: '是否为每位会员剔除自己伞下业绩最大的一条推广线' },
+  { key: 'bonus.team_exclude_ratio', value: 0, group: 'bonus', description: '最大推广线的占比阈值，0=无条件剔除（需至少2条直属会员线）' },
   { key: 'transfer.enabled', value: true, group: 'transfer', description: '转账总开关' },
   { key: 'transfer.limit', value: 0, group: 'transfer', description: '单笔转账限额，0=不限' },
   { key: 'transfer.accept_timeout_hours', value: 24, group: 'transfer', description: '转账确认超时（小时）' },
-  { key: 'token.transfer_enabled', value: true, group: 'token', description: '数权转账开关（即时到账）' },
-  { key: 'token.transfer_limit', value: 0, group: 'token', description: '数权单笔转账限额，0=不限' },
+  { key: 'token.transfer_enabled', value: true, group: 'token', description: '太阳值转账开关（即时到账）' },
+  { key: 'token.transfer_limit', value: 0, group: 'token', description: '太阳值单笔转账限额，0=不限' },
   { key: 'order.auto_finish_days', value: 10, group: 'order', description: '自动确认收货天数' },
   { key: 'order.pay_timeout_minutes', value: 30, group: 'order', description: '支付超时（分钟）' },
   { key: 'access.partner_min_level', value: 1, group: 'access', description: '合伙人端准入最低等级（含）' },
@@ -55,12 +54,11 @@ const FEATURE_FLAGS = [
   ['referral.center', '推广中心', 'referral'],
   ['team.view', '团队查看', 'team'],
   ['bonus.detail', '收益明细', 'bonus'],
-  ['equity.account', '权益值账户', 'equity'],
-  ['equity.transfer', '权益值转账', 'equity'],
+  ['wallet.transfer_quota', '权益通', 'wallet'],
   ['wallet.account', '钱包余额', 'wallet'],
   ['wallet.transfer', '余额转账', 'wallet'],
-  ['token.view', '数权查看', 'token'],
-  ['token.transfer', '数权转账', 'token'],
+  ['token.view', '太阳值查看', 'token'],
+  ['token.transfer', '太阳值转账', 'token'],
   ['rank.view', '等级信息', 'rank'],
   ['rank.dividend', '分红池明细', 'rank'],
   ['notify.subscribe', '消息订阅', 'notify'],
@@ -88,7 +86,7 @@ async function main() {
     await prisma.package.upsert({
       where: { id: p.id },
       create: { ...p, items: p.items as never, status: 1 },
-      update: { name: p.name, price: p.price, equityValue: p.equityValue, durationDays: p.durationDays, items: p.items as never, sort: p.sort },
+      update: { name: p.name, price: p.price, transferQuota: p.transferQuota, durationDays: p.durationDays, items: p.items as never, sort: p.sort },
     });
   }
   console.log(`  packages: ${PACKAGES.length}`);
@@ -192,7 +190,7 @@ async function main() {
       create: { userId: user.id },
       update: {},
     });
-    await prisma.equityAccount.upsert({
+    await prisma.transferQuotaAccount.upsert({
       where: { userId: user.id },
       create: { userId: user.id },
       update: {},

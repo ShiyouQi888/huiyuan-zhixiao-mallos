@@ -65,7 +65,7 @@ export class RelationService {
         phone: true,
         rankLevel: true,
         packageId: true,
-        equityStatus: true,
+        transferQuotaStatus: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },

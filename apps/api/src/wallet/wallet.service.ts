@@ -82,8 +82,8 @@ export class WalletService {
   }
 
   /** 转账发起：balance -= amount，frozen += amount */
-  async freeze(userId: bigint, amount: bigint, transferNo: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  async freeze(userId: bigint, amount: bigint, transferNo: string, transaction?: Tx): Promise<void> {
+    const apply = async (tx: Tx) => {
       const acc = await this.ensure(userId, tx);
       if (acc.balance - acc.frozen < amount) throw new BusinessException(3001, '钱包可用余额不足');
       const updated = await tx.wallet.updateMany({
@@ -103,12 +103,14 @@ export class WalletService {
           remark: '转账发起，资金冻结',
         },
       });
-    });
+    };
+    if (transaction) await apply(transaction);
+    else await this.prisma.$transaction(apply);
   }
 
   /** 转账确认：转出方 frozen -= amount，转入方 balance += amount */
-  async confirmTransfer(fromId: bigint, toId: bigint, amount: bigint, transferNo: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  async confirmTransfer(fromId: bigint, toId: bigint, amount: bigint, transferNo: string, transaction?: Tx): Promise<void> {
+    const apply = async (tx: Tx) => {
       const from = await this.ensure(fromId, tx);
       const f = await tx.wallet.updateMany({
         where: { userId: fromId, version: from.version },
@@ -136,12 +138,14 @@ export class WalletService {
       await tx.walletTransaction.create({
         data: { userId: toId, type: 4, changeAmount: amount, balanceAfter: to.balance + amount, bizType: 'wallet_transfer_in', bizId: transferNo },
       });
-    });
+    };
+    if (transaction) await apply(transaction);
+    else await this.prisma.$transaction(apply);
   }
 
   /** 超时/拒绝退回：frozen -= amount，balance += amount */
-  async unfreeze(userId: bigint, amount: bigint, transferNo: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  async unfreeze(userId: bigint, amount: bigint, transferNo: string, transaction?: Tx): Promise<void> {
+    const apply = async (tx: Tx) => {
       const acc = await this.ensure(userId, tx);
       const updated = await tx.wallet.updateMany({
         where: { userId, version: acc.version },
@@ -151,7 +155,9 @@ export class WalletService {
       await tx.walletTransaction.create({
         data: { userId, type: 6, changeAmount: amount, balanceAfter: acc.balance + amount, bizType: 'wallet_transfer_refund', bizId: transferNo },
       });
-    });
+    };
+    if (transaction) await apply(transaction);
+    else await this.prisma.$transaction(apply);
   }
 
   async transactions(userId: bigint, page = 1, pageSize = 20) {

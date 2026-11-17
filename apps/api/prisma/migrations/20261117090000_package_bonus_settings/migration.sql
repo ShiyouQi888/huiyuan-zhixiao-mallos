@@ -1,0 +1,4 @@
+ALTER TABLE "Package"
+  ADD COLUMN IF NOT EXISTS "directRewardRate" DECIMAL(5,4),
+  ADD COLUMN IF NOT EXISTS "repurchaseRewardRate" DECIMAL(5,4),
+  ADD COLUMN IF NOT EXISTS "directReleaseDays" INTEGER;

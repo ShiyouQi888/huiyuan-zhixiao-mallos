@@ -39,6 +39,7 @@ export function Risk() {
       title: '标记该风控事件为已处理？',
       description: `${EVENT_NAMES[event.eventType] ?? event.eventType} · ${event.user?.nickname ?? '未知会员'}。标记后不再出现在待处理列表。`,
       confirmText: '标记已处理',
+      confirmationText: `处理风控事件 ${event.id}`,
     });
     if (!agreed) return;
     try {

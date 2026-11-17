@@ -7,6 +7,7 @@ import type { Platform } from '@solar/shared';
 
 const CACHE_KEY = 'features:all';
 const SUPPORTED_PLATFORMS: readonly Platform[] = ['h5', 'app'];
+const UNIMPLEMENTED_FEATURES = new Set(['notify.subscribe', 'customer.service', 'equity.account', 'equity.transfer']);
 
 /**
  * 功能开关中心：三层控制
@@ -40,6 +41,7 @@ export class FeaturesService {
     const flags = await this.all();
     return flags
       .filter((f) => {
+        if (UNIMPLEMENTED_FEATURES.has(f.code)) return false;
         if (!f.enabled) return false;
         const platforms = f.platforms as string[];
         if (Array.isArray(platforms) && platforms.length > 0 && !platforms.includes(platform)) return false;
@@ -49,12 +51,15 @@ export class FeaturesService {
   }
 
   async allForAdmin() {
-    return this.all();
+    return (await this.all()).map((flag) => UNIMPLEMENTED_FEATURES.has(flag.code)
+      ? { ...flag, enabled: false, locked: true }
+      : { ...flag, locked: false });
   }
 
   /** 后端写接口二次校验，防止绕过前端直接调用 */
   async assertEnabled(code: string, platform: Platform = 'h5', rankLevel = 0): Promise<void> {
     this.validatePlatform(platform);
+    if (UNIMPLEMENTED_FEATURES.has(code)) throw Err.featureDisabled(`功能「${code}」尚未接入真实服务，当前不可用`);
     const flag = (await this.all()).find((f) => f.code === code);
     if (!flag || !flag.enabled) throw Err.featureDisabled(`功能「${code}」已关闭`);
     const platforms = flag.platforms as string[];
@@ -68,11 +73,12 @@ export class FeaturesService {
 
   async isEnabled(code: string): Promise<boolean> {
     const flag = (await this.all()).find((f) => f.code === code);
-    return !!flag?.enabled;
+    return !UNIMPLEMENTED_FEATURES.has(code) && !!flag?.enabled;
   }
 
   async isAvailable(code: string, platform: Platform = 'h5', rankLevel = 0): Promise<boolean> {
     this.validatePlatform(platform);
+    if (UNIMPLEMENTED_FEATURES.has(code)) return false;
     const flag = (await this.all()).find((f) => f.code === code);
     if (!flag?.enabled || rankLevel < flag.minRankLevel) return false;
     const platforms = flag.platforms as string[];
@@ -87,6 +93,7 @@ export class FeaturesService {
 
   /** 切换开关，立即失效缓存 */
   async toggle(code: string, enabled: boolean, platforms?: string[], minRankLevel?: number, operatorId?: bigint) {
+    if (enabled && UNIMPLEMENTED_FEATURES.has(code)) throw Err.featureDisabled('该功能尚无可用服务端能力，不能开启');
     if (typeof enabled !== 'boolean') throw Err.param('功能状态必须为布尔值');
     if (platforms !== undefined) {
       if (!Array.isArray(platforms) || platforms.some((platform) => !SUPPORTED_PLATFORMS.includes(platform as Platform))) {

@@ -70,7 +70,7 @@ onMounted(load);
     <PageHeading
       eyebrow="收益中心"
       title="我的收益"
-      subtitle="五条收益线，每日结算，70% 钱包 + 30% 数权"
+      subtitle="五条收益线，每日结算，70% 钱包 + 30% 太阳值"
     />
 
     <section class="card card--hero income-hero">
@@ -110,7 +110,7 @@ onMounted(load);
         v-for="record in records"
         :key="record.id"
         :title="NAMES[record.type]"
-        :subtitle="`${String(record.settleDate).slice(0, 10)} · 现金 ${money(record.cashAmount)} · 数权 ${money(record.tokenAmount)}`"
+        :subtitle="`${String(record.settleDate).slice(0, 10)} · 现金 ${money(record.cashAmount)} · 太阳值 ${money(record.tokenAmount)}`"
         :value="`+¥${money(record.amount)}`"
         value-tone="green"
       >

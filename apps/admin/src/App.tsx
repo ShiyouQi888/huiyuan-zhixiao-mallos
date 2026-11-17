@@ -12,11 +12,13 @@ const Catalog = lazy(() => import('./pages/Catalog').then((module) => ({ default
 const FileManager = lazy(() => import('./pages/FileManager').then((module) => ({ default: module.FileManager })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const Features = lazy(() => import('./pages/Features').then((module) => ({ default: module.Features })));
+const FinanceDashboard = lazy(() => import('./pages/FinanceDashboard').then((module) => ({ default: module.FinanceDashboard })));
 const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
 const Operators = lazy(() => import('./pages/Operators').then((module) => ({ default: module.Operators })));
 const Members = lazy(() => import('./pages/Members').then((module) => ({ default: module.Members })));
 const Orders = lazy(() => import('./pages/Orders').then((module) => ({ default: module.Orders })));
 const Reports = lazy(() => import('./pages/Reports').then((module) => ({ default: module.Reports })));
+const ReferralPoster = lazy(() => import('./pages/ReferralPoster').then((module) => ({ default: module.ReferralPoster })));
 const Risk = lazy(() => import('./pages/Risk').then((module) => ({ default: module.Risk })));
 const Ranks = lazy(() => import('./pages/Ranks').then((module) => ({ default: module.Ranks })));
 const Settlements = lazy(() => import('./pages/Settlements').then((module) => ({ default: module.Settlements })));
@@ -79,9 +81,11 @@ export default function App() {
         <Route path="/categories" element={<Categories />} />
         <Route path="/files" element={<FileManager />} />
         <Route path="/ranks" element={<Ranks />} />
+        <Route path="/referral-poster" element={<ReferralPoster />} />
         <Route path="/assets" element={<Assets />} />
         <Route path="/risk" element={<Risk />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/finance" element={<FinanceDashboard />} />
         <Route path="/system" element={<SystemSettings />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/approvals" element={<Approvals />} />

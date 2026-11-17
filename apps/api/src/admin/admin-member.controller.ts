@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, Put, Req } from '@nestjs/common';
+import { Body, Controller, Headers, Param, Post, Put, Req } from '@nestjs/common';
 import { Request } from 'express';
 import bcrypt from 'bcryptjs';
 import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
@@ -59,7 +59,7 @@ export class AdminMemberController {
         select: { id: true, nickname: true, phone: true, inviteCode: true, status: true, rankLevel: true, createdAt: true },
       });
       await tx.wallet.create({ data: { userId: member.id } });
-      await tx.equityAccount.create({ data: { userId: member.id } });
+      await tx.transferQuotaAccount.create({ data: { userId: member.id } });
       await tx.auditLog.create({
         data: {
           operatorType: 'ADMIN', operatorId: operator.id, action: 'MEMBER_CREATED', targetType: 'USER', targetId: member.id,
@@ -138,6 +138,7 @@ export class AdminMemberController {
     @Param('id') id: string,
     @Body() body: { amount?: number; reason?: string },
     @CurrentUser() operator: CurrentUserPayload,
+    @Headers('x-idempotency-key') idempotencyKey?: string,
   ) {
     const userId = this.parseId(id);
     const member = await this.findMember(userId);
@@ -147,7 +148,96 @@ export class AdminMemberController {
     }
     const reason = body.reason?.trim() ?? '';
     if (reason.length < 2 || reason.length > 256) throw Err.param('请填写 2–256 个字符的充值原因');
-    return this.adjust.adjustWallet(userId, BigInt(body.amount), `会员钱包充值：${reason}`, operator.id);
+    return this.adjust.adjustWallet(userId, BigInt(body.amount), `会员钱包充值：${reason}`, operator.id, idempotencyKey);
+  }
+
+  @Post(':id/wallet/adjust')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async adjustWallet(
+    @Param('id') id: string,
+    @Body() body: { amount?: number; reason?: string },
+    @CurrentUser() operator: CurrentUserPayload,
+    @Headers('x-idempotency-key') idempotencyKey?: string,
+  ) {
+    const userId = this.parseId(id);
+    const member = await this.findMember(userId);
+    if (member.status === 2) throw Err.conflict('已注销会员不能调整钱包');
+    if (typeof body.amount !== 'number' || !Number.isSafeInteger(body.amount) || body.amount === 0) {
+      throw Err.param('调整金额必须为非零整数元');
+    }
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 2 || reason.length > 256) throw Err.param('请填写 2–256 个字符的调整原因');
+    return this.adjust.adjustWallet(userId, BigInt(body.amount), reason, operator.id, idempotencyKey);
+  }
+
+  @Post(':id/wallet/clear-available')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async clearWalletAvailable(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @CurrentUser() operator: CurrentUserPayload,
+    @Headers('x-idempotency-key') idempotencyKey?: string,
+  ) {
+    const userId = this.parseId(id);
+    const member = await this.findMember(userId);
+    if (member.status === 2) throw Err.conflict('已注销会员不能调整钱包');
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 2 || reason.length > 256) throw Err.param('请填写 2–256 个字符的清零原因');
+    return this.adjust.clearWalletAvailable(userId, reason, operator.id, idempotencyKey);
+  }
+
+  @Post(':id/transfer-quota/grant')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async grantTransferQuota(
+    @Param('id') id: string,
+    @Body() body: { amount?: number; reason?: string },
+    @CurrentUser() operator: CurrentUserPayload,
+    @Headers('x-idempotency-key') idempotencyKey?: string,
+  ) {
+    const userId = this.parseId(id);
+    const member = await this.findMember(userId);
+    if (member.status === 2) throw Err.conflict('已注销会员不能增加权益通');
+    if (typeof body.amount !== 'number' || !Number.isSafeInteger(body.amount) || body.amount <= 0) {
+      throw Err.param('权益通增加额度必须为大于 0 的整数元');
+    }
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 2 || reason.length > 256) throw Err.param('请填写 2–256 个字符的增加原因');
+    return this.adjust.grantTransferQuota(userId, BigInt(body.amount), reason, operator.id, idempotencyKey);
+  }
+
+  @Post(':id/transfer-quota/adjust')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async adjustTransferQuota(
+    @Param('id') id: string,
+    @Body() body: { amount?: number; reason?: string },
+    @CurrentUser() operator: CurrentUserPayload,
+    @Headers('x-idempotency-key') idempotencyKey?: string,
+  ) {
+    const userId = this.parseId(id);
+    const member = await this.findMember(userId);
+    if (member.status === 2) throw Err.conflict('已注销会员不能调整权益通');
+    if (typeof body.amount !== 'number' || !Number.isSafeInteger(body.amount) || body.amount === 0) {
+      throw Err.param('调整额度必须为非零整数元');
+    }
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 2 || reason.length > 256) throw Err.param('请填写 2–256 个字符的调整原因');
+    return this.adjust.adjustTransferQuota(userId, BigInt(body.amount), reason, operator.id, idempotencyKey);
+  }
+
+  @Post(':id/transfer-quota/clear-available')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async clearTransferQuotaAvailable(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+    @CurrentUser() operator: CurrentUserPayload,
+    @Headers('x-idempotency-key') idempotencyKey?: string,
+  ) {
+    const userId = this.parseId(id);
+    const member = await this.findMember(userId);
+    if (member.status === 2) throw Err.conflict('已注销会员不能调整权益通');
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 2 || reason.length > 256) throw Err.param('请填写 2–256 个字符的清零原因');
+    return this.adjust.clearTransferQuotaAvailable(userId, reason, operator.id, idempotencyKey);
   }
 
   @Post(':id/delete')

@@ -52,7 +52,7 @@ function countNodes(n: any): number {
         </div>
         <div style="text-align:right">
           <div class="tag">Lv.{{ m.rankLevel }}</div>
-          <div class="subtitle" style="font-size:10px;margin-top:5px">{{ m.equityStatus === 1 ? '暂停计酬' : '正常计酬' }}</div>
+          <div class="subtitle" style="font-size:10px;margin-top:5px">{{ m.transferQuotaStatus === 1 ? '权益通已用完' : '权益通可用' }}</div>
         </div>
       </div>
     </div>

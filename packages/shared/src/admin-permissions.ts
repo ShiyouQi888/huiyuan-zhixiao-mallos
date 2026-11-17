@@ -23,7 +23,9 @@ export const ADMIN_PERMISSION_MODULES: AdminPermissionModule[] = [
   { code: 'members', name: '会员管理', path: '/members', description: '会员资料、状态与关系' },
   { code: 'bonuses', name: '奖金管理', path: '/bonuses', description: '奖金记录与调整流程' },
   { code: 'ranks', name: '等级管理', path: '/ranks', description: '会员礼包与等级规则' },
-  { code: 'assets', name: '钱包与权益值', path: '/assets', description: '账户、流水与转账审核' },
+  { code: 'referral.poster', name: '邀请海报', path: '/referral-poster', description: 'H5 邀请海报模板与二维码排版' },
+  { code: 'assets', name: '资产管理', path: '/assets', description: '钱包、权益通、资产流水与会员转账审核' },
+  { code: 'finance', name: '财务大盘', path: '/finance', description: '钱包、权益通、太阳值、订单与会员资金总览' },
   { code: 'settlements', name: '日结与对账', path: '/settlements', description: '日结、重跑与资金对账' },
   { code: 'risk', name: '风控中心', path: '/risk', description: '风险事件与设备管理' },
   { code: 'approvals', name: '审批中心', path: '/approvals', description: '敏感业务申请与复核' },
@@ -36,8 +38,8 @@ export const ADMIN_PERMISSION_MODULES: AdminPermissionModule[] = [
 
 export const ADMIN_ROLE_PERMISSION_CODES: Record<AdminRole, string[]> = {
   SUPER_ADMIN: ADMIN_PERMISSION_MODULES.map((module) => module.code),
-  OPERATOR: ['dashboard', 'catalog', 'categories', 'files', 'orders', 'members', 'bonuses', 'assets', 'settlements', 'risk', 'approvals', 'reports'],
-  FINANCE: ['dashboard', 'orders', 'members', 'bonuses', 'assets', 'settlements', 'approvals', 'reports'],
+  OPERATOR: ['dashboard', 'catalog', 'categories', 'files', 'orders', 'members', 'bonuses', 'assets', 'finance', 'settlements', 'risk', 'approvals', 'reports'],
+  FINANCE: ['dashboard', 'orders', 'members', 'bonuses', 'assets', 'finance', 'settlements', 'approvals', 'reports'],
   SUPPORT: ['orders', 'members', 'reports'],
 };
 
@@ -60,6 +62,7 @@ export function resolveAdminApiPermission(requestPath: string): string | undefin
     ['/api/admin/catalog', 'catalog'],
     ['/api/admin/files', 'files'],
     ['/api/admin/dashboard', 'dashboard'],
+    ['/api/admin/finance', 'finance'],
     ['/api/admin/members', 'members'],
     ['/api/admin/orders', 'orders'],
     ['/api/admin/bonus', 'bonuses'],
@@ -68,8 +71,10 @@ export function resolveAdminApiPermission(requestPath: string): string | undefin
     ['/api/admin/transfers', 'assets'],
     ['/api/admin/wallets', 'assets'],
     ['/api/admin/equity', 'assets'],
+    ['/api/admin/transfer-quotas', 'assets'],
     ['/api/admin/tokens', 'assets'],
     ['/api/admin/packages', 'catalog'],
+    ['/api/admin/referral/poster', 'referral.poster'],
     ['/api/admin/products', 'catalog'],
     ['/api/admin/ranks', 'ranks'],
     ['/api/admin/risk', 'risk'],

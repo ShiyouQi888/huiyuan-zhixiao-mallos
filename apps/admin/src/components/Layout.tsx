@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, Archive, ChevronRight, CircleDollarSign, ClipboardCheck,
   FileBarChart, Files, FolderTree, Gift, LayoutDashboard, LogOut, Menu, Package, ScrollText,
-  Settings2, ShieldAlert, ShoppingBag, Trophy, UserCog, Users, Wallet, X,
+  QrCode, Settings2, ShieldAlert, ShoppingBag, Trophy, UserCog, Users, Wallet, X, BarChart3,
 } from 'lucide-react';
 import { Button } from './ui';
 import { ThemeToggle } from './ThemeToggle';
@@ -24,12 +24,14 @@ const navGroups = [
       { to: '/members', label: '会员管理', icon: Users },
       { to: '/bonuses', label: '奖金管理', icon: CircleDollarSign },
       { to: '/ranks', label: '等级管理', icon: Trophy },
+      { to: '/referral-poster', label: '邀请海报', icon: QrCode },
     ],
   },
   {
     label: '资金与结算',
     items: [
-      { to: '/assets', label: '钱包与权益值', icon: Wallet },
+      { to: '/finance', label: '财务大盘', icon: BarChart3 },
+      { to: '/assets', label: '资产管理', icon: Wallet },
       { to: '/settlements', label: '日结与对账', icon: Activity },
     ],
   },
@@ -39,7 +41,7 @@ const navGroups = [
       { to: '/risk', label: '风控中心', icon: ShieldAlert },
       { to: '/approvals', label: '审批中心', icon: ClipboardCheck },
       { to: '/features', label: '功能开关', icon: Settings2 },
-      { to: '/reports', label: '数据报表', icon: FileBarChart },
+      { to: '/reports', label: '经营报表', icon: FileBarChart },
     ],
   },
   {

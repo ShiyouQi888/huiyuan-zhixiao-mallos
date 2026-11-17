@@ -19,33 +19,46 @@ export class AuthController {
   async register(
     @Body() body: { phone: string; password: string; inviteCode?: string; nickname?: string; deviceFingerprint?: string },
   ) {
-    if (!/^1\d{10}$/.test(body.phone ?? '')) throw Err.param('手机号格式不正确');
-    if (!body.password || body.password.length < 6) throw Err.param('密码至少 6 位');
-    if (await this.prisma.user.findUnique({ where: { phone: body.phone } })) {
+    if (!body || typeof body !== 'object') throw Err.param('请填写注册信息');
+    const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    const nickname = typeof body.nickname === 'string' ? body.nickname.trim() : '';
+    const inviteCode = typeof body.inviteCode === 'string' ? body.inviteCode.trim().toUpperCase() : '';
+    const deviceFingerprint = typeof body.deviceFingerprint === 'string' ? body.deviceFingerprint.trim() : '';
+    if (!/^1[3-9]\d{9}$/.test(phone)) throw Err.param('手机号格式不正确');
+    if (password.length < 8 || password.length > 64) throw Err.param('密码长度须为 8 至 64 位');
+    if (nickname && (nickname.length < 2 || nickname.length > 64)) throw Err.param('昵称长度须为 2 至 64 个字符');
+    if (inviteCode && !/^[A-Z0-9]{4,32}$/.test(inviteCode)) throw Err.param('邀请码格式不正确');
+    if (deviceFingerprint.length > 128) throw Err.param('设备标识格式不正确');
+    if (await this.prisma.user.findUnique({ where: { phone } })) {
       throw Err.param('该手机号已注册');
     }
 
-    const parent = body.inviteCode
-      ? await this.prisma.user.findUnique({ where: { inviteCode: body.inviteCode } })
+    const parent = inviteCode
+      ? await this.prisma.user.findUnique({ where: { inviteCode } })
       : null;
-    if (body.inviteCode && (!parent || parent.status !== 0)) throw Err.param('推荐码无效或推荐人已注销');
+    if (inviteCode && (!parent || parent.status !== 0)) throw Err.param('推荐码无效或推荐人已注销');
     if (parent) assertDepthAllowed(parent.depth + 1);
 
-    const inviteCode = await this.relation.generateInviteCode();
-    const user = await this.prisma.user.create({
-      data: {
-        phone: body.phone,
-        passwordHash: bcrypt.hashSync(body.password, 10),
-        nickname: body.nickname ?? `会员${body.phone.slice(-4)}`,
-        inviteCode,
-        deviceFingerprint: body.deviceFingerprint,
-        parentId: parent?.id ?? null,
-        path: parent ? `${parent.path}${parent.id},` : ',',
-        depth: parent ? parent.depth + 1 : 0,
-      },
+    const generatedInviteCode = await this.relation.generateInviteCode();
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          phone,
+          passwordHash,
+          nickname: nickname || `会员${phone.slice(-4)}`,
+          inviteCode: generatedInviteCode,
+          deviceFingerprint: deviceFingerprint || null,
+          parentId: parent?.id ?? null,
+          path: parent ? `${parent.path}${parent.id},` : ',',
+          depth: parent ? parent.depth + 1 : 0,
+        },
+      });
+      await tx.wallet.create({ data: { userId: created.id } });
+      await tx.transferQuotaAccount.create({ data: { userId: created.id } });
+      return created;
     });
-    await this.prisma.wallet.create({ data: { userId: user.id } });
-    await this.prisma.equityAccount.create({ data: { userId: user.id } });
 
     return this.sign(user.id, user.phone, user.role, user.authVersion);
   }
@@ -54,6 +67,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('login')
   async login(@Body() body: { phone: string; password: string }) {
+    if (!body || typeof body !== 'object') throw Err.param('请输入手机号和密码');
     const user = await this.prisma.user.findUnique({ where: { phone: body.phone } });
     if (!user || !user.passwordHash || !bcrypt.compareSync(body.password ?? '', user.passwordHash)) {
       throw Err.unauthorized('手机号或密码错误');

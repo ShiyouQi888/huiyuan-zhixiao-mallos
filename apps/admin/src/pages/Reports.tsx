@@ -73,8 +73,14 @@ export function Reports() {
   const maxHierarchy = Math.max(1, ...hierarchy.map((h) => Number(h._count?._all ?? 0)));
 
   const ledgerRows = [
-    { title: '权益值 · 发行总账', data: issuance?.equity, tone: 'text-accent-ink', icon: <Coins size={15} /> },
-    { title: '钱包余额 · 发行总账', data: issuance?.wallet, tone: 'text-success', icon: <Wallet size={15} /> },
+    {
+      title: '权益通 · 额度总账', data: issuance?.transferQuota, tone: 'text-accent-ink', icon: <Coins size={15} />,
+      metrics: [['档位累计发放', issuance?.transferQuota?.granted], ['已消耗', issuance?.transferQuota?.used], ['待确认占用', issuance?.transferQuota?.reserved], ['剩余权益通', issuance?.transferQuota?.available]],
+    },
+    {
+      title: '钱包余额 · 资金总账', data: issuance?.wallet, tone: 'text-success', icon: <Wallet size={15} />,
+      metrics: [['累计入账', issuance?.wallet?.issued], ['流通中', issuance?.wallet?.circulating], ['累计出账', issuance?.wallet?.consumed], ['平台沉淀', issuance?.wallet?.sunk]],
+    },
   ];
 
   return (
@@ -106,11 +112,11 @@ export function Reports() {
                   trend={`日均 ${fmtMoney(perfData.length ? perfTotal / perfData.length : 0)}`}
                 />
                 <StatCard
-                  label="权益值流通中"
-                  value={fmtMoney(issuance?.equity?.circulating)}
+                  label="剩余权益通"
+                  value={fmtMoney(issuance?.transferQuota?.available)}
                   icon={<Coins size={17} />}
                   accent="info"
-                  trend={`累计发行 ${fmtMoney(issuance?.equity?.issued)}`}
+                  trend={`档位累计授权 ${fmtMoney(issuance?.transferQuota?.granted)}`}
                 />
                 <StatCard
                   label="钱包余额流通中"
@@ -133,12 +139,7 @@ export function Reports() {
                   <Card key={row.title}>
                     <CardHeader title={row.title} icon={row.icon} />
                     <div className="divide-y divide-line px-4">
-                      {[
-                        ['累计发行', row.data?.issued],
-                        ['流通中', row.data?.circulating],
-                        ['已消费', row.data?.consumed],
-                        ['平台沉淀', row.data?.sunk],
-                      ].map(([label, value]) => (
+                      {row.metrics.map(([label, value]) => (
                         <div key={label as string} className="flex items-center justify-between py-2.5 text-xs">
                           <span className="text-ink-muted">{label}</span>
                           <span className={`num font-medium ${row.tone}`}>{fmtMoney(value)}</span>
@@ -148,18 +149,26 @@ export function Reports() {
                   </Card>
                 ))}
                 <Card>
-                  <CardHeader title="数权 · 发行总账" icon={<Coins size={15} />} />
+                  <CardHeader title="太阳值 · 记账总账" icon={<Coins size={15} />} />
                   <div className="divide-y divide-line px-4">
                     <div className="flex items-center justify-between py-2.5 text-xs">
                       <span className="text-ink-muted">累计记账</span>
                       <span className="num font-medium text-ink">{fmtMoney(issuance?.token?.issued)}</span>
                     </div>
                     <div className="flex items-center justify-between py-2.5 text-xs">
-                      <span className="text-ink-muted">可流转</span>
-                      <Badge tone="neutral">否</Badge>
+                      <span className="text-ink-muted">会员账户流通</span>
+                      <span className="num font-medium text-ink">{fmtMoney(issuance?.token?.circulating)}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2.5 text-xs">
+                      <span className="text-ink-muted">会员间转入 / 转出</span>
+                      <span className="num font-medium text-ink">{fmtMoney(issuance?.token?.transferIn)} / {fmtMoney(issuance?.token?.transferOut)}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-2.5 text-xs">
+                      <span className="text-ink-muted">交易所接入</span>
+                      <Badge tone={issuance?.token?.exchangeConnected ? 'success' : 'neutral'}>{issuance?.token?.exchangeConnected ? '已接入' : '未接入'}</Badge>
                     </div>
                     <p className="py-2.5 text-2xs leading-5 text-ink-faint">
-                      数权为奖金 30% 部分，仅记账，不参与消费与转让。
+                      太阳值按奖金规则记账，支持系统内互转；当前未接入外部交易平台。
                     </p>
                   </div>
                 </Card>

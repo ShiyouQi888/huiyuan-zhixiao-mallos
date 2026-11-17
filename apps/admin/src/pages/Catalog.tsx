@@ -87,6 +87,15 @@ export function Catalog() {
   };
 
   const save = async () => {
+    if (!editing) return;
+    const agreed = await confirm({
+      title: editing.id ? `确认保存商品「${editing.name}」？` : `确认创建商品「${editing.name}」？`,
+      description: `售价 ¥${Number(editing.price).toLocaleString('zh-CN')}，库存 ${Number(editing.stock).toLocaleString('zh-CN')}，当前状态为${Number(editing.status) === 1 ? '上架' : '下架'}。保存会影响商城商品信息和会员购买价格。`,
+      confirmText: editing.id ? '确认保存商品' : '确认创建商品',
+      tone: 'danger',
+      confirmationText: `${editing.id ? '保存商品' : '创建商品'} ${editing.name}`,
+    });
+    if (!agreed) return;
     try {
       const payload = {
         name: editing.name,
@@ -117,9 +126,18 @@ export function Catalog() {
   };
 
   const toggleStatus = async (p: Product) => {
+    const nextStatus = p.status === 1 ? 0 : 1;
+    const agreed = await confirm({
+      title: `确认${nextStatus === 1 ? '上架' : '下架'}商品「${p.name}」？`,
+      description: nextStatus === 1 ? '商品将立即在会员端商城展示。' : '商品将从会员端商城隐藏，已下单订单不受影响。',
+      confirmText: `确认${nextStatus === 1 ? '上架' : '下架'}`,
+      tone: nextStatus === 1 ? 'primary' : 'danger',
+      confirmationText: `${nextStatus === 1 ? '上架' : '下架'}商品 ${p.name}`,
+    });
+    if (!agreed) return;
     try {
-      await patch('/admin/catalog/products/status', { ids: [p.id], status: p.status === 1 ? 0 : 1 });
-      notify(p.status === 1 ? '已下架' : '已上架', 'success');
+      await patch('/admin/catalog/products/status', { ids: [p.id], status: nextStatus });
+      notify(nextStatus === 0 ? '已下架' : '已上架', 'success');
       load();
     } catch (e: any) { notify(e.message, 'error'); }
   };
@@ -132,6 +150,7 @@ export function Catalog() {
         : '下架后商品将从会员端商城隐藏，已下单订单不受影响。',
       confirmText: nextStatus === 1 ? '批量上架' : '批量下架',
       tone: nextStatus === 1 ? 'primary' : 'danger',
+      confirmationText: `批量${nextStatus === 1 ? '上架' : '下架'}商品 ${selected.length} 件`,
     });
     if (!agreed) return;
     try {
@@ -148,6 +167,7 @@ export function Catalog() {
       description: '删除后商品将从商城移除，此操作不可撤销。',
       confirmText: '删除商品',
       tone: 'danger',
+      confirmationText: `删除 ${p.name}`,
     });
     if (!agreed) return;
     try {

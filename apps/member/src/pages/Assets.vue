@@ -7,20 +7,21 @@ import { Toast } from './_toast';
 import PageHeading from '../components/PageHeading.vue';
 import EmptyState from '../components/EmptyState.vue';
 import AppModal from '../components/AppModal.vue';
-import { ArrowDownLeft, ArrowUpRight, BadgeDollarSign, Coins, WalletCards } from 'lucide-vue-next';
+import { ArrowDownLeft, ArrowUpRight, BadgeDollarSign, CircleAlert, Coins, WalletCards } from 'lucide-vue-next';
 
-type AssetTab = 'wallet' | 'equity' | 'token';
+type AssetTab = 'wallet' | 'quota' | 'token';
 const store = useUserStore();
 const router = useRouter();
 const tab = ref<AssetTab>('wallet');
 const wallet = ref<any>(null);
-const equity = ref<any>(null);
+const transferQuota = ref<any>(null);
 const token = ref<any>(null);
 const txs = ref<any[]>([]);
 const transfers = ref<any[]>([]);
 const transferTotal = ref(0);
 const transferPage = ref(1);
 const showTransfer = ref(false);
+const showQuotaWarning = ref(false);
 const toPhone = ref('');
 const amount = ref('');
 const paymentPassword = ref('');
@@ -38,24 +39,32 @@ const transferPages = computed(() => Math.max(1, Math.ceil(transferTotal.value /
 
 const allTabs = [
   { key: 'wallet' as const, label: '钱包余额', icon: WalletCards },
-  { key: 'equity' as const, label: '权益值', icon: BadgeDollarSign },
-  { key: 'token' as const, label: '数权', icon: Coins },
+  { key: 'quota' as const, label: '权益通', icon: BadgeDollarSign },
+  { key: 'token' as const, label: '太阳值', icon: Coins },
 ];
 const featureForTab: Record<AssetTab, string> = {
-  wallet: 'wallet.account', equity: 'equity.account', token: 'token.view',
+  wallet: 'wallet.account', quota: 'wallet.transfer_quota', token: 'token.view',
 };
 const tabs = computed(() => allTabs.filter((item) => store.has(featureForTab[item.key])));
 const assetTitle = computed(() => tabs.value.find((item) => item.key === tab.value)?.label ?? '我的资产');
-const transferFeature = computed(() => tab.value === 'wallet' ? 'wallet.transfer' : tab.value === 'equity' ? 'equity.transfer' : 'token.transfer');
+const quotaOverage = computed(() => Math.max(
+  0,
+  Number(transferQuota.value?.used ?? 0)
+    - Number(transferQuota.value?.granted ?? 0)
+    + Number(transferQuota.value?.adjustedOut ?? 0),
+));
+const transferFeature = computed(() => tab.value === 'wallet' ? 'wallet.transfer' : tab.value === 'token' ? 'token.transfer' : '');
 const TX_LABEL: Record<string, string> = {
-  token_bonus: '奖金数权',
-  token_transfer_in: '数权转入',
-  token_transfer_out: '数权转出',
-  equity_grant: '权益值发放',
-  equity_transfer_out: '权益值转出',
-  equity_transfer_in: '权益值转入',
-  equity_transfer_refund: '权益值退款',
-  equity_expire: '权益值过期',
+  token_bonus: '太阳值奖励入账',
+  token_transfer_in: '太阳值转入',
+  token_transfer_out: '太阳值转出',
+  wallet_transfer_quota_reserve: '权益通预占',
+  wallet_transfer_quota_release: '权益通返还',
+  wallet_transfer_quota_consume: '钱包转出消耗权益通',
+  wallet_product_spend: '商城消费消耗权益通',
+  package_1: '会员档位额度发放',
+  package_2: '档位升级补充额度',
+  package_3: '复消解锁权益通',
   order_balance: '订单余额抵扣',
 };
 function txLabel(bizType: string) {
@@ -70,15 +79,16 @@ watch(tabs, (available) => {
 
 async function loadTx() {
   if (!store.has(featureForTab[tab.value])) { txs.value = []; return; }
-  const path = tab.value === 'wallet'
+  const path = tab.value === 'quota'
+    ? '/me/transfer-quota/transactions'
+    : tab.value === 'wallet'
     ? '/me/wallet/transactions'
-    : tab.value === 'equity'
-      ? '/me/equity/transactions'
       : '/me/token/transactions';
   txs.value = (await api<any>(path).catch(() => null))?.list ?? [];
 }
 
 async function loadTransfers(page = transferPage.value) {
+  if (tab.value === 'quota') { transfers.value = []; transferTotal.value = 0; return; }
   if (!store.has(featureForTab[tab.value])) { transfers.value = []; transferTotal.value = 0; return; }
   transferPage.value = page;
   const result = await api<any>(`/me/transfers/${tab.value}?page=${page}`).catch(() => null);
@@ -99,10 +109,8 @@ async function acceptTransfer(tx: any) {
   if (accepting.value) return;
   accepting.value = String(tx.id);
   try {
-    const path = tab.value === 'wallet'
-      ? `/me/wallet/transfers/${tx.id}/accept`
-      : `/me/equity/transfers/${tx.id}/accept`;
-    await post(path);
+    if (tab.value !== 'wallet') return;
+    await post(`/me/wallet/transfers/${tx.id}/accept`);
     Toast('已确认接收，资产到账', 'success');
     await load();
   } catch (e: any) {
@@ -114,12 +122,12 @@ async function acceptTransfer(tx: any) {
 
 async function load() {
   await store.loadProfile().catch(() => {});
-  const [w, e, t] = await Promise.all([
+  const [w, quota, t] = await Promise.all([
     store.has('wallet.account') ? api<any>('/me/wallet').catch(() => null) : Promise.resolve(null),
-    store.has('equity.account') ? api<any>('/me/equity').catch(() => null) : Promise.resolve(null),
+    store.has('wallet.transfer_quota') ? api<any>('/me/transfer-quota').catch(() => null) : Promise.resolve(null),
     store.has('token.view') ? api<any>('/me/token').catch(() => null) : Promise.resolve(null),
   ]);
-  wallet.value = w; equity.value = e; token.value = t;
+  wallet.value = w; transferQuota.value = quota; token.value = t;
   await Promise.all([loadTx(), loadTransfers(1)]);
 }
 
@@ -130,22 +138,54 @@ function switchTab(next: AssetTab) {
   loadTransfers(1);
 }
 
+async function warnQuotaInsufficient() {
+  error.value = '';
+  paymentPassword.value = '';
+  showTransfer.value = false;
+  const latestQuota = await api<any>('/me/transfer-quota').catch(() => null);
+  if (latestQuota) transferQuota.value = latestQuota;
+  showQuotaWarning.value = true;
+}
+
+function openTransfer() {
+  if (tab.value === 'wallet' && Number(transferQuota.value?.available ?? 0) <= 0) {
+    void warnQuotaInsufficient();
+    return;
+  }
+  error.value = '';
+  showTransfer.value = true;
+}
+
 async function transfer() {
   if (!validTransfer.value) return;
+  if (tab.value === 'wallet' && Number(amount.value) > Number(transferQuota.value?.available ?? 0)) {
+    await warnQuotaInsufficient();
+    return;
+  }
   error.value = '';
   busy.value = true;
   try {
     const path = `/me/${tab.value}/transfers`;
     await post(path, { toPhone: toPhone.value.trim(), amount: Number(amount.value), paymentPassword: paymentPassword.value });
-    Toast(tab.value === 'token' ? '数权已即时到账' : '转账已发起，等待对方 24 小时内确认', 'success');
+    Toast(tab.value === 'token' ? '太阳值已即时到账' : '转账已发起，等待对方 24 小时内确认', 'success');
     showTransfer.value = false;
     toPhone.value = ''; amount.value = ''; paymentPassword.value = '';
     await load();
   } catch (e: any) {
-    error.value = e.message ?? '操作失败，请稍后重试';
+    const message = e.message ?? '操作失败，请稍后重试';
+    if (tab.value === 'wallet' && message.includes('权益通不足')) {
+      await warnQuotaInsufficient();
+    } else {
+      error.value = message;
+    }
   } finally {
     busy.value = false;
   }
+}
+
+function goToRepurchase() {
+  showQuotaWarning.value = false;
+  router.push('/packages');
 }
 
 onMounted(load);
@@ -153,7 +193,7 @@ onMounted(load);
 
 <template>
   <main class="page">
-    <PageHeading back eyebrow="资产中心" title="我的资产" subtitle="查看账户余额、权益批次与资金变动记录" />
+    <PageHeading back eyebrow="资产中心" title="我的资产" subtitle="查看钱包余额、权益通与资金变动记录" />
 
     <div v-if="tabs.length" class="asset-tabs" role="tablist" aria-label="资产类型">
       <button v-for="item in tabs" :key="item.key" type="button" role="tab" class="asset-tab"
@@ -170,42 +210,40 @@ onMounted(load);
       <div class="asset-overview-foot">
         <span>账户余额 ¥{{ money(wallet?.balance) }}</span><span>冻结 ¥{{ money(wallet?.frozen) }}</span>
       </div>
-      <button v-if="store.has('wallet.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="error = ''; showTransfer = true">发起转账</button>
+      <button v-if="store.has('wallet.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="openTransfer">发起转账</button>
       <button v-else-if="store.has('wallet.transfer')" type="button" class="asset-transfer-button" @click="router.push('/security/transfer-password')">设置支付密码</button>
     </section>
 
-    <section v-else-if="tab === 'equity'" class="asset-overview asset-overview--equity">
-      <div class="asset-overview-top"><span class="asset-icon"><BadgeDollarSign :size="19" aria-hidden="true" /></span><span>可用权益值</span></div>
-      <div class="asset-balance">{{ money(equity?.balance) }}</div>
+    <section v-else-if="tab === 'quota'" class="asset-overview asset-overview--quota">
+      <div class="asset-overview-top"><span class="asset-icon"><BadgeDollarSign :size="19" aria-hidden="true" /></span><span>可用权益通</span></div>
+      <div class="asset-balance">{{ money(transferQuota?.available) }} <small>权益通</small></div>
       <div class="asset-overview-foot">
-        <span>{{ equity?.lots?.length ?? 0 }} 个有效批次</span><span>按到期时间优先抵扣</span>
+        <span>累计获得 {{ money(transferQuota?.granted) }}</span>
+        <span>已消耗 {{ money(transferQuota?.used) }}</span>
+        <span>待确认 {{ money(transferQuota?.reserved) }}</span>
       </div>
-      <p class="asset-description">权益值可用于下单抵扣与会员间转账，额度用完后可通过复消恢复计酬。</p>
-      <button v-if="store.has('equity.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="error = ''; showTransfer = true">发起转让</button>
-      <button v-else-if="store.has('equity.transfer')" type="button" class="asset-transfer-button" @click="router.push('/security/transfer-password')">设置支付密码</button>
-      <div v-if="equity?.lots?.length" class="equity-lots">
-        <div v-for="lot in equity.lots.slice(0, 4)" :key="lot.id" class="equity-lot">
-          <span>批次余额 {{ money(lot.remaining) }}</span><span>{{ String(lot.expireAt).slice(0, 10) }} 到期</span>
-        </div>
-      </div>
+      <p v-if="quotaOverage > 0" class="asset-description asset-description--warning">
+        历史消费超出当时权益通额度 {{ money(quotaOverage) }}。已支付订单不会自动撤销；商城新订单现已限制在可用权益通内。
+      </p>
+      <p v-else class="asset-description">钱包转出和商城商品订单都会消耗权益通；额度用完后，需完成档位复消才能继续。会员卡购买、升级、复消、收到转账和奖励不消耗权益通。</p>
     </section>
 
     <section v-else class="asset-overview asset-overview--token">
-      <div class="asset-overview-top"><span class="asset-icon"><Coins :size="19" aria-hidden="true" /></span><span>可用数权</span></div>
+      <div class="asset-overview-top"><span class="asset-icon"><Coins :size="19" aria-hidden="true" /></span><span>太阳值</span></div>
       <div class="asset-balance">{{ money(token?.total) }}</div>
       <div class="asset-overview-foot">
         <span>累计获得 {{ money(token?.granted) }}</span><span>转入 {{ money(token?.transferIn) }}</span><span>转出 {{ money(token?.transferOut) }}</span>
       </div>
-      <p class="asset-description">数权为奖金分配中的记账部分，可会员间互转、即时到账；不提现、不消费。</p>
-      <button v-if="store.has('token.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="error = ''; showTransfer = true">发起互转</button>
+      <p class="asset-description">太阳值按奖金规则记账，当前支持会员间系统内互转；尚未接入外部交易平台。</p>
+      <button v-if="store.has('token.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="openTransfer">发起互转</button>
       <button v-else-if="store.has('token.transfer')" type="button" class="asset-transfer-button" @click="router.push('/security/transfer-password')">设置支付密码</button>
     </section>
 
     <div v-if="tabs.length" class="asset-section-head">
-      <div><h2>{{ tab === 'token' ? '数权明细' : `${assetTitle}流水` }}</h2><p>按发生时间展示账户变动</p></div>
+        <div><h2>{{ tab === 'token' ? '太阳值明细' : `${assetTitle}流水` }}</h2><p>按发生时间展示账户变动</p></div>
     </div>
     <div v-if="tabs.length && tab === 'token'" class="asset-note">
-      <Coins :size="18" aria-hidden="true" /><span>数权由平台按奖金规则记账，可会员间互转（即时到账），不可提现或消费。</span>
+      <Coins :size="18" aria-hidden="true" /><span>太阳值由平台按奖金规则记账，当前支持会员间互转，未接入外部交易平台。</span>
     </div>
     <div v-if="tabs.length && txs.length" class="transaction-list">
       <article v-for="tx in txs" :key="tx.id" class="transaction-row">
@@ -213,17 +251,21 @@ onMounted(load);
           <ArrowDownLeft v-if="Number(tx.changeAmount) >= 0" :size="17" aria-hidden="true" />
           <ArrowUpRight v-else :size="17" aria-hidden="true" />
         </span>
-        <div class="transaction-copy"><strong>{{ txLabel(tx.bizType) }}</strong><span>{{ new Date(tx.createdAt).toLocaleString('zh-CN') }}</span></div>
+        <div class="transaction-copy"><strong>{{ txLabel(tx.bizType) }}</strong>
+          <span v-if="tab === 'quota' && tx.remark">{{ tx.remark }}</span>
+          <span>{{ new Date(tx.createdAt).toLocaleString('zh-CN') }}</span></div>
         <strong class="transaction-amount" :class="{ 'transaction-amount--positive': Number(tx.changeAmount) >= 0 }">
-          {{ Number(tx.changeAmount) >= 0 ? '+' : '' }}{{ money(tx.changeAmount) }}
+          {{ tab === 'quota' && Number(tx.changeAmount) === 0 ? '已计入已用' : `${Number(tx.changeAmount) >= 0 ? '+' : ''}${money(tx.changeAmount)}` }}
         </strong>
       </article>
     </div>
+    <EmptyState v-else-if="tabs.length && tab === 'quota'" title="额度明细从新规则启用后开始记录"
+      description="历史已完成礼包订单和钱包转出已回算到额度账户；旧历史交易不会补生成额度流水。" />
     <EmptyState v-else-if="tabs.length" title="暂无交易流水" description="账户发生变动后，记录会显示在这里" />
 
-    <template v-if="tabs.length">
+    <template v-if="tabs.length && tab !== 'quota'">
       <div class="asset-section-head">
-        <div><h2>{{ tab === 'wallet' ? '转账记录' : tab === 'equity' ? '转让记录' : '互转记录' }}</h2><p>{{ tab === 'token' ? '即时到账，无需对方确认' : '发起后需对方 24 小时内确认' }}</p></div>
+        <div><h2>{{ tab === 'wallet' ? '钱包转账记录' : '太阳值互转记录' }}</h2><p>{{ tab === 'token' ? '即时到账，无需对方确认' : '发起后需对方 24 小时内确认' }}</p></div>
         <span class="asset-section-count">共 {{ transferTotal }} 笔</span>
       </div>
 
@@ -245,7 +287,7 @@ onMounted(load);
               {{ TRANSFER_STATUS[tx.status] ?? tx.status }}
             </span>
             <button
-              v-if="tx.status === 'PENDING' && !isMe(tx.fromUserId)"
+              v-if="tab === 'wallet' && tx.status === 'PENDING' && !isMe(tx.fromUserId)"
               type="button"
               class="transfer-accept"
               :disabled="accepting === String(tx.id)"
@@ -267,14 +309,26 @@ onMounted(load);
 
     <p v-if="tabs.length" class="asset-disclaimer">平台资产仅限系统内按业务规则使用，具体规则以平台公示为准。</p>
 
-    <AppModal v-if="store.profile?.transferPasswordSet && (store.has('wallet.transfer') || store.has('equity.transfer') || store.has('token.transfer'))" v-model="showTransfer" eyebrow="资产操作" :title="`发起${tab === 'wallet' ? '转账' : tab === 'equity' ? '转让' : '互转'}`"
+    <AppModal v-if="store.profile?.transferPasswordSet && (store.has('wallet.transfer') || store.has('token.transfer'))" v-model="showTransfer" eyebrow="资产操作" :title="`发起${tab === 'wallet' ? '转账' : '互转'}`"
       :description="error || (tab === 'token' ? '填写对方手机号与数量，提交后即时到账。' : '填写对方手机号与数量，提交后等待对方确认。')"
       :confirm-loading="busy" :confirm-disabled="!validTransfer" confirm-text="确认发起"
-      hint="需验证转账支付密码；数权即时到账，余额与权益值需对方在 24 小时内确认。" @confirm="transfer"
+      hint="需验证转账支付密码；太阳值即时到账，钱包余额需对方在 24 小时内确认并占用相应权益通。" @confirm="transfer"
       @cancel="paymentPassword = ''; error = ''">
       <label class="app-field"><span>对方手机号</span><t-input v-model="toPhone" type="tel" placeholder="请输入已实名会员手机号" /></label>
-      <label class="app-field"><span>{{ tab === 'wallet' ? '转账金额' : tab === 'equity' ? '转让权益值' : '互转数权' }}</span><t-input v-model="amount" type="number" placeholder="请输入数量" /></label>
+      <label class="app-field"><span>{{ tab === 'wallet' ? '转账金额' : '互转太阳值' }}</span><t-input v-model="amount" type="number" placeholder="请输入数量" /></label>
       <label class="app-field"><span>转账支付密码</span><input v-model="paymentPassword" class="input" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="请输入 6 位数字密码" /></label>
+    </AppModal>
+
+    <AppModal v-model="showQuotaWarning" eyebrow="转出提醒" title="权益通不足"
+      description="权益通不足，请完成档位复消后继续转出。"
+      cancel-text="知道了" confirm-text="前往档位复消" :alert="true" @confirm="goToRepurchase">
+      <div class="quota-warning-details">
+        <span class="quota-warning-icon"><CircleAlert :size="21" aria-hidden="true" /></span>
+        <div>
+          <p v-if="Number(amount) > 0">本次申请转出 <strong>{{ money(amount) }}</strong></p>
+          <p>当前可用权益通 <strong>{{ money(transferQuota?.available) }}</strong></p>
+        </div>
+      </div>
     </AppModal>
   </main>
 </template>
@@ -285,7 +339,7 @@ onMounted(load);
 .asset-tab svg { color: currentColor; }
 .asset-tab.active { background: var(--brand-soft); color: var(--brand); }
 .asset-overview { position: relative; overflow: hidden; padding: 19px; border-radius: 18px; background: radial-gradient(circle at 92% 4%, rgba(255, 255, 255, .26), transparent 46%), linear-gradient(120deg, #ff8a4c 0%, #f45a1f 56%, #e3410c 100%); color: #fff; box-shadow: 0 12px 28px rgba(224, 66, 12, 0.2); }
-.asset-overview--equity { background: radial-gradient(circle at 92% 4%, rgba(255, 255, 255, .24), transparent 46%), linear-gradient(120deg, #2fbf93 0%, #0e9f6e 58%, #0a7f58 100%); box-shadow: 0 12px 28px rgba(10, 127, 88, 0.18); }
+.asset-overview--quota { background: radial-gradient(circle at 92% 4%, rgba(255, 255, 255, .24), transparent 46%), linear-gradient(120deg, #2fbf93 0%, #0e9f6e 58%, #0a7f58 100%); box-shadow: 0 12px 28px rgba(10, 127, 88, 0.18); }
 .asset-overview--token { background: radial-gradient(circle at 92% 4%, rgba(255, 255, 255, .18), transparent 46%), linear-gradient(120deg, #46506a 0%, #2b3243 60%, #1d2230 100%); box-shadow: 0 12px 28px rgba(15, 23, 42, 0.24); }
 .asset-overview-top { display: flex; align-items: center; gap: 8px; color: rgba(255, 255, 255, .82); font-size: 11px; font-weight: 600; }
 .asset-icon { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 10px; background: rgba(255, 255, 255, .18); color: #fff; }
@@ -293,11 +347,14 @@ onMounted(load);
 .asset-overview-foot { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 9px; color: rgba(255, 255, 255, .78); font-size: 10px; }
 .asset-transfer { position: absolute; right: 16px; top: 18px; }
 .asset-transfer-button { position: absolute; top: 17px; right: 16px; display: inline-flex; min-height: 30px; align-items: center; justify-content: center; padding: 0 12px; border: 0; border-radius: 9px; background: #fff; color: #e8460d; font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; box-shadow: 0 4px 12px rgba(15, 23, 42, .12); }
-.asset-overview--equity .asset-transfer-button { color: #0a7f58; }
 .asset-overview--token .asset-transfer-button { color: #2b3243; }
-.equity-lots { display: grid; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, .22); }
-.equity-lot { display: flex; justify-content: space-between; gap: 10px; color: rgba(255, 255, 255, .78); font-size: 10px; }
 .asset-description { max-width: 290px; margin: 10px 0 0; color: rgba(255, 255, 255, .78); font-size: 10.5px; line-height: 1.65; }
+.asset-description--warning { color: #ffd2a6; }
+.quota-warning-details { display: flex; align-items: flex-start; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid color-mix(in srgb, var(--amber) 24%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--amber) 7%, var(--surface)); }
+.quota-warning-icon { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; background: color-mix(in srgb, var(--amber) 14%, var(--surface)); color: var(--amber); }
+.quota-warning-details p { margin: 1px 0 7px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.quota-warning-details p:last-child { margin-bottom: 0; }
+.quota-warning-details strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .asset-section-head { display: flex; align-items: flex-end; justify-content: space-between; margin: 23px 0 12px; }
 .asset-section-head h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14.5px; font-weight: 700; }
 .asset-section-head h2::before { content: ''; width: 3px; height: 13px; border-radius: 2px; background: linear-gradient(180deg, #ff8a4c, #f4470f); }

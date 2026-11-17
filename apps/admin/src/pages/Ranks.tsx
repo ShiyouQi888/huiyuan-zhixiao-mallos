@@ -37,11 +37,21 @@ export function Ranks() {
   useEffect(load, []);
 
   const save = async () => {
+    if (!editing) return;
+    const agreed = await confirm({
+      title: creating ? '确认新增会员等级？' : `确认保存「${editing.name}」等级规则？`,
+      description: `等级门槛 ¥${Number(editing.threshold).toLocaleString('zh-CN')}，团队奖费率 ${(Number(editing.teamRate) * 100).toFixed(2)}%，分红池比例 ${(Number(editing.poolRate) * 100).toFixed(2)}%。修改会影响后续自动晋级和日结计算。`,
+      confirmText: creating ? '确认新增等级' : '确认保存等级规则',
+      tone: 'danger',
+      confirmationText: `${creating ? '新增' : '保存'}等级规则 ${editing.name}`,
+    });
+    if (!agreed) return;
     setSaving(true);
     try {
       const payload = {
         name: editing.name,
         threshold: Number(editing.threshold),
+        transferQuotaGrant: Number(editing.transferQuotaGrant || 0),
         teamRate: Number(editing.teamRate),
         poolRate: Number(editing.poolRate),
       };
@@ -61,7 +71,7 @@ export function Ranks() {
   const openCreate = () => {
     const nextThreshold = Math.max(0, ...ranks.map((rank) => Number(rank.threshold) || 0)) + 1;
     setCreating(true);
-    setEditing({ name: '', threshold: String(nextThreshold), teamRate: '0', poolRate: '0' });
+    setEditing({ name: '', threshold: String(nextThreshold), transferQuotaGrant: '0', teamRate: '0', poolRate: '0' });
   };
 
   const toggleStatus = async (rank: any) => {
@@ -73,6 +83,7 @@ export function Ranks() {
         : '停用后不再自动晋级到该等级，现有会员保留该等级与历史分配规则。',
       confirmText: enable ? '确认启用' : '确认停用',
       tone: enable ? 'primary' : 'danger',
+      confirmationText: `${enable ? '启用' : '停用'}等级 ${rank.name}`,
     });
     if (!agreed) return;
     try {
@@ -90,6 +101,7 @@ export function Ranks() {
       description: '仅无会员、分红快照与升级记录引用的等级可以删除。已有历史数据的等级请停用。',
       confirmText: '删除等级',
       tone: 'danger',
+      confirmationText: `删除 ${rank.name}`,
     });
     if (!agreed) return;
     try {
@@ -107,7 +119,7 @@ export function Ranks() {
     <>
       <PageHeader
         title="等级管理"
-        description="职级门槛与费率配置（修改后下次日结生效）、历史升级记录"
+        description="配置业务等级晋升额度、业绩门槛与分配比例，并查看会员升级记录"
         action={canManage ? <Button variant="primary" onClick={openCreate}><Plus size={15} />新增等级</Button> : undefined}
       />
 
@@ -138,7 +150,7 @@ export function Ranks() {
         <Card className="overflow-hidden">
           <CardHeader
             title="等级参数"
-            description="团队奖费率与分红池比例均以小数填写，例如 0.05 表示 5%"
+            description="配置晋升新增权益通额度与业务分配比例；跨级手动调整会累计所跨启用等级的额度"
           />
           {loading ? <TableSkeleton rows={7} cols={6} /> : ranks.length === 0 ? (
             <Empty text="暂无等级配置" description="等级体系由后端初始化，如缺失请检查基础数据。" icon={<Layers size={18} />} />
@@ -150,6 +162,7 @@ export function Ranks() {
                     <th className="th">等级</th>
                     <th className="th">名称</th>
                     <th className="th text-right">累计业绩门槛</th>
+                    <th className="th text-right">晋升新增权益通</th>
                     <th className="th text-right">团队奖费率</th>
                     <th className="th text-right">分红池比例</th>
                     <th className="th">状态</th>
@@ -162,6 +175,7 @@ export function Ranks() {
                       <td className="td"><Badge tone={r.level > 0 ? 'brand' : 'neutral'}>Lv.{r.level}</Badge></td>
                       <td className="td"><span className="cell-strong">{r.name}</span></td>
                       <td className="td num text-right">{fmtMoney(r.threshold)}</td>
+                      <td className="td num text-right text-accent-ink">{fmtMoney(r.transferQuotaGrant)}</td>
                       <td className="td num text-right text-accent-ink">{percent(r.teamRate)}</td>
                       <td className="td num text-right text-success">{percent(r.poolRate)}</td>
                       <td className="td"><Badge tone={r.status === 1 ? 'success' : 'neutral'} dot>{r.status === 1 ? '已启用' : '已停用'}</Badge></td>
@@ -248,6 +262,16 @@ export function Ranks() {
                 type="number"
                 value={editing.threshold}
                 onChange={(e) => setEditing({ ...editing, threshold: e.target.value })}
+              />
+            </Field>
+            <Field label="晋升新增权益通（元）" hint="后续后台手工晋升至此等级时发放；跨级会累计途经的启用等级额度，不追溯已有会员。设为 0 表示不发放。">
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                value={editing.transferQuotaGrant ?? '0'}
+                onChange={(e) => setEditing({ ...editing, transferQuotaGrant: e.target.value })}
               />
             </Field>
             <div className="grid grid-cols-2 gap-3">

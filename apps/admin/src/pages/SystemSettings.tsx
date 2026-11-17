@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Save, Settings2, ShieldCheck } from 'lucide-react';
 import { api, put } from '../api';
 import {
-  Badge, Button, Card, CardHeader, Empty, Field, Modal, PageHeader, TableSkeleton, Tabs, Toast,
+  Badge, Button, Card, CardHeader, Empty, Field, Modal, PageHeader, TableSkeleton, Tabs, Toast, useConfirm,
 } from '../components/ui';
 
 const PERMISSION_ROWS = [
@@ -29,6 +29,7 @@ export function SystemSettings() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [tone, setTone] = useState<'success' | 'error' | 'info'>('info');
+  const { confirm, confirmNode } = useConfirm();
 
   const notify = (message: string, nextTone: 'success' | 'error' | 'info' = 'info') => {
     setToast(message);
@@ -52,6 +53,14 @@ export function SystemSettings() {
       notify('配置值不是有效 JSON。字符串请使用双引号，例如 "value"', 'error');
       return;
     }
+    const agreed = await confirm({
+      title: `确认修改系统配置「${editing.key}」？`,
+      description: `新值：${JSON.stringify(parsed)}。全局配置可能影响多个业务流程，保存后立即生效。`,
+      confirmText: '确认修改配置',
+      tone: 'danger',
+      confirmationText: `修改系统配置 ${editing.key}`,
+    });
+    if (!agreed) return;
     setSaving(true);
     try {
       await put(`/admin/configs/${encodeURIComponent(editing.key)}`, { value: parsed });
@@ -204,6 +213,7 @@ export function SystemSettings() {
       )}
 
       {toast && <Toast message={toast} tone={tone} onClose={() => setToast('')} />}
+      {confirmNode}
     </>
   );
 }

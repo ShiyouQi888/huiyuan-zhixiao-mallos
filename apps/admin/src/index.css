@@ -452,6 +452,10 @@ input, select, textarea { font-family: inherit; }
   text-align: left;
   white-space: nowrap;
 }
+.admin-table .th.text-right,
+.admin-table .td.text-right { text-align: right; }
+.admin-table .th.text-center,
+.admin-table .td.text-center { text-align: center; }
 .admin-table .th:first-child { padding-left: 16px; }
 .admin-table .th:last-child { padding-right: 16px; }
 .admin-table .td {

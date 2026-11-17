@@ -5,7 +5,6 @@ export interface AggUser {
   parentId: bigint | null;
   depth: number;
   rankLevel: number;
-  equityStatus: number;
   peerBonusLocked: boolean;
 }
 
@@ -72,18 +71,16 @@ export interface ExcludedLine {
 }
 
 /**
- * 全局剔除：在整张关系网中找出「业绩最大的一条直推线」。
- * - 候选条件：该上级的直接下线 ≥ 2 条（单线独苗不参与剔除）；
- * - ratio > 0 时，还需该线占上级伞下当日业绩的比例超过阈值；
- * - 业绩并列的时候取 parentId / childId 较小者，保证结果确定性。
- *
- * 注意：这是**全局唯一一条**，不是每个上级各剔一条。
+ * 每位上级分别剔除自己伞下业绩最大的一条直推线。
+ * - 候选条件：该上级至少有 2 条直接下线（单线独苗不参与剔除）；
+ * - ratio > 0 时，还需最大线占该上级伞下当日业绩的比例超过阈值；
+ * - 业绩并列时取 childId 较小者，确保结果确定。
  */
-export function selectGlobalExcludedLine(
+export function selectMaxExcludedLines(
   children: Map<bigint, Array<{ id: bigint; teamAmount: bigint }>>,
   ratio = 0,
-): ExcludedLine | null {
-  let best: ExcludedLine | null = null;
+): Map<bigint, ExcludedLine> {
+  const excluded = new Map<bigint, ExcludedLine>();
   for (const [parentId, list] of children) {
     if (list.length < 2) continue;
 
@@ -98,20 +95,14 @@ export function selectGlobalExcludedLine(
     const total = list.reduce((s, c) => s + c.teamAmount, 0n);
     if (total <= 0n) continue;
     if (ratio > 0) {
-      // maxAmount / total > ratio（千分比整数比较，避免浮点误差）
-      const scaled = BigInt(Math.round(ratio * 1000));
-      if (maxAmount * 1000n <= total * scaled) continue;
+      // 百分比配置支持 0.01% 精度；使用整数比较避免浮点误差。
+      const scale = 1_000_000_000n;
+      const scaledRatio = BigInt(Math.round(ratio * Number(scale)));
+      if (maxAmount * scale <= total * scaledRatio) continue;
     }
-    if (
-      !best
-      || maxAmount > best.amount
-      || (maxAmount === best.amount
-        && (parentId < best.parentId || (parentId === best.parentId && childId < best.childId)))
-    ) {
-      best = { parentId, childId, amount: maxAmount };
-    }
+    excluded.set(parentId, { parentId, childId, amount: maxAmount });
   }
-  return best;
+  return excluded;
 }
 
 /** 团队奖有效基数：伞下当日业绩减去被剔除线的子树业绩 */

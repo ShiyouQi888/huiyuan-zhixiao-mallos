@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Clock3, FileClock, RefreshCw, X } from 'lucide-react';
+import { Check, FileClock, Plus, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
 import {
   Badge, Button, Card, Drawer, Empty, Field, FilterBar, Modal, PageHeader, Pagination,
@@ -8,11 +8,9 @@ import {
 
 const TABS = [
   { key: 'wallet', label: '钱包账户' },
-  { key: 'equity', label: '权益值账户' },
-  { key: 'lots', label: '已过期批次' },
+  { key: 'quota', label: '权益通' },
   { key: 'walletTransfers', label: '钱包转账' },
-  { key: 'equityTransfers', label: '权益值转账' },
-  { key: 'tokens', label: '数权总账' },
+  { key: 'tokens', label: '太阳值总账' },
 ] as const;
 type AssetTab = typeof TABS[number]['key'];
 const PAGE_SIZE = 20;
@@ -42,15 +40,22 @@ const TRANSFER_STATUS: Record<string, { label: string; tone: 'warning' | 'succes
 const LEDGER_TYPE: Record<number, string> = {
   1: '奖金入账', 2: '消费扣款', 3: '转出', 4: '转入', 5: '人工调整', 6: '转账退回',
 };
+const QUOTA_LEDGER_TYPE: Record<number, string> = {
+  1: '权益通发放', 2: '转账预占', 3: '权益通返还', 4: '转账确认', 5: '权益通调整', 6: '商城消费',
+};
 
 export function Assets() {
-  const [tab, setTab] = useState<AssetTab>(() => new URLSearchParams(window.location.search).get('tab') === 'walletTransfers' ? 'walletTransfers' : 'wallet');
+  const [tab, setTab] = useState<AssetTab>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    return TABS.some((item) => item.key === requested) ? requested as AssetTab : 'wallet';
+  });
   const [data, setData] = useState<any[]>([]);
   const [total, setTotal] = useState<number | undefined>(undefined);
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [adjust, setAdjust] = useState<any>(null);
+  const [adjustBusy, setAdjustBusy] = useState(false);
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [ledgerUser, setLedgerUser] = useState<any>(null);
@@ -58,10 +63,13 @@ export function Assets() {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerTotal, setLedgerTotal] = useState(0);
-  const [lotUser, setLotUser] = useState<any>(null);
-  const [lots, setLots] = useState<any[]>([]);
-  const [lotsLoading, setLotsLoading] = useState(false);
+  const [quotaLedgerUser, setQuotaLedgerUser] = useState<any>(null);
+  const [quotaLedger, setQuotaLedger] = useState<any[]>([]);
+  const [quotaLedgerLoading, setQuotaLedgerLoading] = useState(false);
+  const [quotaLedgerPage, setQuotaLedgerPage] = useState(1);
+  const [quotaLedgerTotal, setQuotaLedgerTotal] = useState(0);
   const [busyTransfer, setBusyTransfer] = useState<string | null>(null);
+  const [busyClear, setBusyClear] = useState<string | null>(null);
   const [toast, setToast] = useState('');
   const { confirm, confirmNode } = useConfirm();
   const role = getAdminRole();
@@ -72,13 +80,11 @@ export function Assets() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page) });
-      if ((tab === 'wallet' || tab === 'equity') && keyword.trim()) params.set('keyword', keyword.trim());
+      if ((tab === 'wallet' || tab === 'quota') && keyword.trim()) params.set('keyword', keyword.trim());
       const path: Record<AssetTab, string> = {
         wallet: '/admin/wallets',
-        equity: '/admin/equity/accounts',
-        lots: '/admin/equity/expired',
+        quota: '/admin/transfer-quotas',
         walletTransfers: '/admin/transfers',
-        equityTransfers: '/admin/equity/transfers',
         tokens: '/admin/tokens',
       };
       const raw = await api<any>(`${path[tab]}?${params.toString()}`);
@@ -114,33 +120,90 @@ export function Assets() {
     await loadLedger(String(row.userId), 1);
   };
 
-  const openLots = async (row: any) => {
-    setLotUser({ id: row.userId, name: row.user?.nickname ?? '会员', phone: row.user?.phone });
-    setLots([]);
-    setLotsLoading(true);
+  const loadQuotaLedger = async (userId: string, pageNumber: number) => {
+    setQuotaLedger([]);
+    setQuotaLedgerLoading(true);
     try {
-      setLots(await api<any[]>(`/admin/equity/${row.userId}/lots`));
+      const result = await api<{ list: any[]; total: number }>(`/admin/transfer-quotas/${userId}/transactions?page=${pageNumber}`);
+      setQuotaLedger(result.list ?? []);
+      setQuotaLedgerTotal(result.total ?? 0);
+      setQuotaLedgerPage(pageNumber);
     } catch (e) {
-      setToast(e instanceof Error ? e.message : '权益值批次加载失败');
+      setToast(e instanceof Error ? e.message : '权益通流水加载失败');
     } finally {
-      setLotsLoading(false);
+      setQuotaLedgerLoading(false);
     }
   };
 
+  const openQuotaLedger = async (row: any) => {
+    setQuotaLedgerUser({ id: String(row.userId), name: row.user?.nickname ?? '会员', phone: row.user?.phone });
+    setQuotaLedgerTotal(0);
+    await loadQuotaLedger(String(row.userId), 1);
+  };
+
   const submitAdjust = async () => {
-    if (!adjust || !reason.trim() || !amount || !Number.isSafeInteger(Number(amount)) || Number(amount) === 0) return;
+    if (!adjust || adjustBusy || !reason.trim() || !amount || !Number.isSafeInteger(Number(amount)) || Number(amount) === 0) return;
+    const delta = Number(amount);
+    const assetName = adjust.asset === 'quota' ? '权益通' : '钱包余额';
+    const agreed = await confirm({
+      title: `确认${delta > 0 ? '增加' : '减少'}${assetName}？`,
+      description: `${adjust.name ?? '该会员'} · ${fmtMoney(Math.abs(delta))}。原因：${reason.trim()}。操作会立即写入账户流水和审计记录。`,
+      confirmText: `确认${delta > 0 ? '增加' : '减少'}`,
+      tone: delta < 0 ? 'danger' : 'primary',
+      confirmationText: `${delta > 0 ? '增加' : '减少'} ${adjust.name ?? '该会员'} ${assetName} ${fmtMoney(Math.abs(delta))}`,
+    });
+    if (!agreed) return;
+    setAdjustBusy(true);
     try {
-      const isWallet = adjust.asset === 'wallet';
-      await post(`/admin/${isWallet ? `wallets/${adjust.userId}/adjust` : `equity/${adjust.userId}/adjust`}`, {
-        amount: Number(amount), reason: reason.trim(),
-      });
-      setToast('调整成功，流水与审计已记录');
+      if (adjust.asset === 'quota') {
+        await post(`/admin/members/${adjust.userId}/transfer-quota/adjust`, {
+          amount: delta, reason: reason.trim(),
+        });
+        setToast(delta > 0 ? '权益通已增加，流水与审计已记录' : '权益通已减少，流水与审计已记录');
+      } else {
+        await post(`/admin/wallets/${adjust.userId}/adjust`, {
+          amount: delta, reason: reason.trim(),
+        });
+        setToast('钱包调整成功，流水与审计已记录');
+      }
       setAdjust(null);
       setAmount('');
       setReason('');
       void load();
     } catch (e) {
       setToast(e instanceof Error ? e.message : '调整失败');
+    } finally {
+      setAdjustBusy(false);
+    }
+  };
+
+  const clearAvailable = async (row: any, asset: 'wallet' | 'quota') => {
+    const available = asset === 'wallet'
+      ? Math.max(0, Number(row.balance) - Number(row.frozen))
+      : Math.max(0, Number(row.available));
+    if (available <= 0 || busyClear) return;
+    const isQuota = asset === 'quota';
+    const memberName = row.user?.nickname ?? row.user?.phone ?? `会员 ${row.userId}`;
+    const agreed = await confirm({
+      title: `清零该会员的可用${isQuota ? '权益通' : '钱包余额'}？`,
+      description: `将减少 ${fmtMoney(available)}。${isQuota ? '已使用和转账预占额度会保留。' : '冻结金额会保留，仅清零可用余额。'}此操作会写入流水与审计记录。`,
+      confirmText: '确认清零可用余额',
+      tone: 'danger',
+      confirmationText: `清零 ${memberName} ${isQuota ? '权益通' : '钱包余额'} ${fmtMoney(available)}`,
+    });
+    if (!agreed) return;
+    const key = `${asset}:${row.userId}`;
+    setBusyClear(key);
+    try {
+      await post(`/admin/members/${row.userId}/${isQuota ? 'transfer-quota' : 'wallet'}/clear-available`, {
+        reason: `管理后台清零可用${isQuota ? '权益通' : '钱包余额'}`,
+      });
+      setToast(`已清零 ${fmtMoney(available)} 可用${isQuota ? '权益通' : '钱包余额'}`);
+      void load();
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '清零失败');
+    } finally {
+      setBusyClear(null);
     }
   };
 
@@ -151,12 +214,12 @@ export function Assets() {
       description: `转账单号 ${row.transferNo}，金额 ${fmtMoney(row.amount)}。审核结果会同步通知双方会员。`,
       confirmText: `确认${actionLabel}`,
       tone: action === 'REJECT' ? 'danger' : 'primary',
+      confirmationText: `${actionLabel}转账 ${row.transferNo}`,
     });
     if (!agreed) return;
     setBusyTransfer(row.id);
     try {
-      const platform = tab === 'walletTransfers' ? 'wallet' : 'equity';
-      await post(`/admin/transfers/${row.id}/review`, { action, platform });
+      await post(`/admin/transfers/${row.id}/review`, { action, platform: 'wallet' });
       setToast(`转账已${actionLabel}`);
       void load();
     } catch (e) {
@@ -166,13 +229,13 @@ export function Assets() {
     }
   };
 
-  const showSearch = tab === 'wallet' || tab === 'equity';
+  const showSearch = tab === 'wallet' || tab === 'quota';
 
   return (
     <>
       <PageHeader
         title="资产管理"
-        description="统一查看钱包、权益值批次、双向转账与数权账目；资金调整保留流水和审计记录"
+        description="统一查看钱包余额、权益通消耗、会员转账与太阳值账目"
         action={(
           <Button variant="secondary" onClick={() => void load()} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
@@ -221,20 +284,16 @@ export function Assets() {
                     <th className="th">会员</th><th className="th text-right">账户余额</th><th className="th text-right">冻结金额</th>
                     <th className="th text-right">可用余额</th><th className="th text-right">累计入账 / 出账</th><th className="th text-right">操作</th>
                   </>}
-                  {tab === 'equity' && <>
-                    <th className="th">会员</th><th className="th text-right">可用权益值</th><th className="th text-right">累计发放</th>
-                    <th className="th text-right">已消费</th><th className="th text-right">已过期</th><th className="th text-right">操作</th>
+                  {tab === 'quota' && <>
+                    <th className="th">会员</th><th className="th text-right">累计获得</th><th className="th text-right">已调减</th><th className="th text-right">已消耗</th>
+                    <th className="th text-right">待确认占用</th><th className="th text-right">剩余权益通</th><th className="th text-right">操作</th>
                   </>}
-                  {tab === 'lots' && <>
-                    <th className="th">会员 ID</th><th className="th text-right">批次总额</th><th className="th text-right">剩余额度</th>
-                    <th className="th">到期时间</th><th className="th">批次状态</th>
-                  </>}
-                  {(tab === 'walletTransfers' || tab === 'equityTransfers') && <>
+                  {tab === 'walletTransfers' && <>
                     <th className="th">转账单号</th><th className="th">转出会员</th><th className="th">转入会员</th>
                     <th className="th text-right">金额</th><th className="th">审核状态</th><th className="th">提交时间</th><th className="th text-right">操作</th>
                   </>}
                   {tab === 'tokens' && <>
-                    <th className="th">会员 ID</th><th className="th text-right">当前数权</th><th className="th text-right">累计获得</th>
+                    <th className="th">会员 ID</th><th className="th text-right">当前太阳值</th><th className="th text-right">累计获得</th>
                     <th className="th text-right">累计转入 / 转出</th><th className="th">账目性质</th>
                   </>}
                 </tr>
@@ -258,36 +317,38 @@ export function Assets() {
                               调整
                             </Button>
                           )}
-                        </div>
-                      </td>
-                    </>}
-                    {tab === 'equity' && <>
-                      <td className="td"><MemberName row={row} /></td>
-                      <td className="td num text-right font-medium text-info">{fmtMoney(row.balance)}</td>
-                      <td className="td num text-right">{fmtMoney(row.totalGranted)}</td>
-                      <td className="td num text-right">{fmtMoney(row.totalUsed)}</td>
-                      <td className="td num text-right text-warning">{fmtMoney(row.totalExpired)}</td>
-                      <td className="td">
-                        <div className="flex justify-end gap-0.5">
-                          <Button size="xs" variant="ghost" className="text-accent-ink" onClick={() => void openLots(row)}>
-                            <Clock3 size={13} />批次
-                          </Button>
-                          {canManageFunds && (
-                            <Button size="xs" variant="ghost" className="text-accent-ink" onClick={() => { setAmount(''); setReason(''); setAdjust({ userId: row.userId, name: row.user?.nickname, asset: 'equity' }); }}>
-                              调整
+                          {canManageFunds && Number(row.balance) > Number(row.frozen) && (
+                            <Button size="xs" variant="ghost" className="hover:text-danger" disabled={busyClear === `wallet:${row.userId}`} onClick={() => void clearAvailable(row, 'wallet')}>
+                              <RotateCcw size={13} />清零可用
                             </Button>
                           )}
                         </div>
                       </td>
                     </>}
-                    {tab === 'lots' && <>
-                      <td className="td mono text-xs text-ink-muted">{row.userId}</td>
-                      <td className="td num text-right">{fmtMoney(row.amount)}</td>
-                      <td className="td num text-right">{fmtMoney(row.remaining)}</td>
-                      <td className="td whitespace-nowrap text-xs text-ink-muted">{fmtDate(row.expireAt)}</td>
-                      <td className="td"><Badge tone="warning">已过期</Badge></td>
+                    {tab === 'quota' && <>
+                      <td className="td"><MemberName row={row} /></td>
+                      <td className="td num text-right">{fmtMoney(row.granted)}</td>
+                      <td className="td num text-right text-danger">{fmtMoney(row.adjustedOut)}</td>
+                      <td className="td num text-right">{fmtMoney(row.used)}</td>
+                      <td className="td num text-right text-warning">{fmtMoney(row.reserved)}</td>
+                      <td className="td num text-right font-medium text-success">{fmtMoney(row.available)}</td>
+                      <td className="td">
+                        <div className="flex justify-end gap-0.5">
+                          <Button size="xs" variant="ghost" className="text-accent-ink" onClick={() => void openQuotaLedger(row)}><FileClock size={13} />流水</Button>
+                          {canManageFunds && (
+                            <Button size="xs" variant="ghost" className="text-accent-ink" onClick={() => { setAmount(''); setReason(''); setAdjust({ userId: row.userId, name: row.user?.nickname, asset: 'quota' }); }}>
+                              <Plus size={13} />调整额度
+                            </Button>
+                          )}
+                          {canManageFunds && Number(row.available) > 0 && (
+                            <Button size="xs" variant="ghost" className="hover:text-danger" disabled={busyClear === `quota:${row.userId}`} onClick={() => void clearAvailable(row, 'quota')}>
+                              <RotateCcw size={13} />清零可用
+                            </Button>
+                          )}
+                        </div>
+                      </td>
                     </>}
-                    {(tab === 'walletTransfers' || tab === 'equityTransfers') && <>
+                    {tab === 'walletTransfers' && <>
                       <td className="td mono text-xs text-ink-muted">{row.transferNo}</td>
                       <td className="td"><MemberName row={row.fromUser ?? { id: row.fromUserId }} /></td>
                       <td className="td"><MemberName row={row.toUser ?? { id: row.toUserId }} /></td>
@@ -341,26 +402,28 @@ export function Assets() {
       <Modal
         open={!!adjust}
         onClose={() => setAdjust(null)}
-        title={adjust?.asset === 'equity' ? '权益值调整' : '钱包余额调整'}
+        title={adjust?.asset === 'quota' ? '权益通额度调整' : '钱包余额调整'}
         description={adjust ? `${adjust.name ?? '会员'} · ID ${adjust.userId}` : undefined}
         footer={(
           <>
             <Button onClick={() => setAdjust(null)}>取消</Button>
             <Button
               variant="primary"
-              disabled={!reason.trim() || !amount || !Number.isSafeInteger(Number(amount)) || Number(amount) === 0}
+              disabled={adjustBusy || !reason.trim() || !amount || !Number.isSafeInteger(Number(amount)) || Number(amount) === 0}
               onClick={() => void submitAdjust()}
             >
-              确认调整
+              {adjustBusy ? '提交中…' : '确认调整'}
             </Button>
           </>
         )}
       >
         <div className="space-y-4">
-          <div className="notice notice-warning">
-            资金调整将产生不可撤销的账务流水，请核对金额并填写可追溯的原因。
+          <div className={adjust?.asset === 'quota' ? 'notice notice-info' : 'notice notice-warning'}>
+            {adjust?.asset === 'quota'
+              ? '正数增加权益通，负数减少可用权益通；已使用和转账预占额度不能扣减。原始累计获得与调减额分别记账，操作会写入流水和审计。'
+              : '可按正负数调整余额；减少金额不能超过可用余额，冻结金额会保留。调整会产生账务流水，请填写可追溯原因。'}
           </div>
-          <Field label="调整金额（整数；负数为扣减）" required>
+          <Field label={adjust?.asset === 'quota' ? '调整金额（正数增加，负数减少）' : '调整金额（正数增加，负数减少）'} required>
             <input
               className="input"
               type="number"
@@ -433,43 +496,42 @@ export function Assets() {
       </Drawer>
 
       <Drawer
-        open={!!lotUser}
-        onClose={() => setLotUser(null)}
-        width={760}
-        title="权益值批次"
-        description={lotUser ? `${lotUser.name} · ${lotUser.phone ?? '—'} · ID ${lotUser.id}` : undefined}
+        open={!!quotaLedgerUser}
+        onClose={() => setQuotaLedgerUser(null)}
+        width={880}
+        title="权益通变动明细"
+        description={quotaLedgerUser ? `${quotaLedgerUser.name} · ${quotaLedgerUser.phone ?? '—'} · ID ${quotaLedgerUser.id}` : undefined}
       >
-        {lotsLoading ? (
-          <TableSkeleton rows={6} cols={5} />
-        ) : lots.length === 0 ? (
-          <Empty text="暂无权益值批次" />
+        {quotaLedgerLoading ? (
+          <TableSkeleton rows={6} cols={6} />
+        ) : quotaLedger.length === 0 ? (
+          <Empty text="暂无权益通变动" description="历史档位订单、钱包转出与商城消费已回算到账户；流水从权益通规则启用后开始记录。" />
         ) : (
-          <div className="table-wrap rounded-lg border border-line">
-            <table className="admin-table">
+          <Card className="overflow-hidden">
+            <div className="table-wrap">
+              <table className="admin-table">
               <thead>
                 <tr>
-                  <th className="th">批次 ID</th><th className="th text-right">发放总额</th><th className="th text-right">剩余额度</th>
-                  <th className="th">发放时间</th><th className="th">到期时间</th><th className="th">状态</th>
+                  <th className="th">类型</th><th className="th text-right">权益通变动</th><th className="th text-right">变动后余额</th>
+                  <th className="th">业务单号</th><th className="th">说明</th><th className="th">时间</th>
                 </tr>
               </thead>
               <tbody>
-                {lots.map((row) => (
+                {quotaLedger.map((row) => (
                   <tr key={row.id} className="admin-row">
-                    <td className="td mono text-xs text-ink-muted">{row.id}</td>
-                    <td className="td num text-right">{fmtMoney(row.amount)}</td>
-                    <td className="td num text-right font-medium text-ink">{fmtMoney(row.remaining)}</td>
+                    <td className="td"><Badge tone={Number(row.changeAmount) >= 0 ? 'success' : 'warning'}>{QUOTA_LEDGER_TYPE[row.type] ?? row.bizType}</Badge></td>
+                    <td className={`td num text-right font-medium ${Number(row.changeAmount) >= 0 ? 'text-success' : 'text-danger'}`}>{row.type === 4 ? '—' : `${Number(row.changeAmount) > 0 ? '+' : ''}${fmtMoney(row.changeAmount)}`}</td>
+                    <td className="td num text-right">{fmtMoney(row.balanceAfter)}</td>
+                    <td className="td mono text-xs text-ink-muted">{row.bizId}</td>
+                    <td className="td text-xs text-ink-muted">{row.remark ?? row.bizType}</td>
                     <td className="td whitespace-nowrap text-xs text-ink-muted">{fmtDate(row.createdAt)}</td>
-                    <td className="td whitespace-nowrap text-xs text-ink-muted">{fmtDate(row.expireAt)}</td>
-                    <td className="td">
-                      <Badge tone={row.status === 'EXPIRED' ? 'warning' : row.status === 'ACTIVE' ? 'success' : 'neutral'}>
-                        {({ ACTIVE: '有效', EXPIRED: '已过期', DEPLETED: '已用完' } as Record<string, string>)[row.status] ?? row.status}
-                      </Badge>
-                    </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+              </table>
+            </div>
+            <Pagination page={quotaLedgerPage} total={quotaLedgerTotal} pageSize={PAGE_SIZE} onChange={(next) => void loadQuotaLedger(quotaLedgerUser.id, next)} />
+          </Card>
         )}
       </Drawer>
 

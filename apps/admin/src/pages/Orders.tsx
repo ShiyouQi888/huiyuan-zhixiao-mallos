@@ -102,6 +102,7 @@ export function Orders() {
       title: '确认订单已交付？',
       description: `订单 ${detail.orderNo} 将标记为已交付，并写入订单状态流水。`,
       confirmText: '确认交付',
+      confirmationText: `交付订单 ${detail.orderNo}`,
     });
     if (!agreed) return;
     setDeliveryBusy(true);
@@ -187,7 +188,7 @@ export function Orders() {
                   <th className="th">会员</th>
                   <th className="th">类型</th>
                   <th className="th text-right">订单金额</th>
-                  <th className="th">抵扣构成</th>
+                  <th className="th">支付构成</th>
                   <th className="th text-right">现金支付</th>
                   <th className="th">状态</th>
                   <th className="th">下单时间</th>
@@ -205,8 +206,8 @@ export function Orders() {
                     <td className="td"><Badge tone="neutral">{TYPE_NAMES[order.type] ?? '订单'}</Badge></td>
                     <td className="td num text-right font-medium text-ink">{fmtMoney(order.amount)}</td>
                     <td className="td">
-                      <div className="num text-2xs text-ink-muted">权益 {fmtMoney(order.equityDeduct)}</div>
-                      <div className="num text-2xs text-ink-faint">余额 {fmtMoney(order.balanceDeduct)}</div>
+                      {Number(order.equityDeduct) > 0 && <div className="num text-2xs text-ink-muted">历史权益抵扣 {fmtMoney(order.equityDeduct)}</div>}
+                      <div className="num text-2xs text-ink-faint">钱包余额 {fmtMoney(order.balanceDeduct)}</div>
                     </td>
                     <td className="td num text-right text-ink-soft">{fmtMoney(order.cashPay)}</td>
                     <td className="td">
@@ -286,8 +287,8 @@ export function Orders() {
               <div className="mb-2 text-xs font-medium text-ink-soft">支付构成</div>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: '权益值抵扣', value: detail.equityDeduct },
-                  { label: '余额抵扣', value: detail.balanceDeduct },
+                  ...(Number(detail.equityDeduct) > 0 ? [{ label: '历史权益抵扣', value: detail.equityDeduct }] : []),
+                  { label: '钱包余额', value: detail.balanceDeduct },
                   { label: '现金支付', value: detail.cashPay },
                 ].map((item) => (
                   <div key={item.label} className="rounded-lg border border-line px-3 py-2">

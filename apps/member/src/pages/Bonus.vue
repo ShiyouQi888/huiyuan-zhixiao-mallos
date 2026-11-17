@@ -21,7 +21,7 @@ onMounted(load);
 <template>
   <div class="page">
     <div class="title">我的收益</div>
-    <div class="subtitle">五条收益线每日结算，70% 进入钱包、30% 记入数权</div>
+    <div class="subtitle">五条收益线每日结算，70% 进入钱包、30% 记入太阳值</div>
 
     <div class="card hero" style="margin-top:18px;padding:22px">
       <div class="subtitle">累计收益</div>
@@ -50,7 +50,7 @@ onMounted(load);
         </div>
         <div style="text-align:right">
           <div class="green" style="font-size:15px;font-weight:650">+¥{{ money(r.amount) }}</div>
-          <div class="subtitle" style="font-size:10px;margin-top:3px">现金 {{ money(r.cashAmount) }} · 数权 {{ money(r.tokenAmount) }}</div>
+          <div class="subtitle" style="font-size:10px;margin-top:3px">现金 {{ money(r.cashAmount) }} · 太阳值 {{ money(r.tokenAmount) }}</div>
         </div>
       </div>
     </div>

@@ -1,0 +1,2 @@
+ALTER TABLE "TransferQuotaAccount"
+ADD COLUMN "adjustedOut" BIGINT NOT NULL DEFAULT 0;

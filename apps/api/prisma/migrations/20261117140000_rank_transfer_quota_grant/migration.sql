@@ -1,0 +1,2 @@
+ALTER TABLE "Rank"
+ADD COLUMN "transferQuotaGrant" BIGINT NOT NULL DEFAULT 0;

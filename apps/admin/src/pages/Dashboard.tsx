@@ -113,7 +113,7 @@ export function Dashboard() {
       {
         to: '/assets?tab=walletTransfers',
         title: '待审核转账',
-        description: '钱包与权益值风险转账',
+        description: '钱包余额风险转账与额度占用',
         count: pendingTransfers,
         icon: <ArrowLeftRight size={16} />,
       },

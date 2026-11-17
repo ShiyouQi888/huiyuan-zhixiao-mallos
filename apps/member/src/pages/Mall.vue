@@ -116,7 +116,7 @@ function categoryTone(index: number) {
       <div class="store-promo-copy">
         <div class="store-promo-label"><BadgePercent :size="13" aria-hidden="true" /> 会员专享</div>
         <h2>精选好物 权益直抵</h2>
-        <p>会员专属价格，结算时可使用权益值与余额</p>
+        <p>会员专属价格，使用钱包余额完成结算</p>
         <button type="button" class="promo-action" @click="router.push('/products')">
           开始选购 <ArrowRight :size="12" aria-hidden="true" />
         </button>
@@ -161,7 +161,7 @@ function categoryTone(index: number) {
     </section>
 
     <section>
-      <SectionHeading title="会员精选" subtitle="会员专属价，支持余额与权益抵扣" action-label="查看全部" to="/products" />
+      <SectionHeading title="会员精选" subtitle="会员专属价，支持钱包余额支付" action-label="查看全部" to="/products" />
       <div v-if="loading" class="product-grid" aria-label="商品加载中">
         <div v-for="index in 4" :key="index" class="skeleton-card">
           <div class="skeleton-block skeleton-media" />
@@ -193,7 +193,7 @@ function categoryTone(index: number) {
           <span class="package-home-top"><span class="package-level"><BadgePercent :size="13" aria-hidden="true" /> {{ item.level }} 级会员</span><ChevronRight :size="15" aria-hidden="true" /></span>
           <span class="package-name">{{ item.name }}</span>
           <span class="package-home-price">¥{{ money(item.price) }}<small>礼包价格</small></span>
-          <span class="package-benefit">包含 <strong>¥{{ money(item.equityValue) }}</strong> 权益值</span>
+          <span class="package-benefit">权益通 <strong>{{ money(item.transferQuota) }}</strong></span>
           <span v-if="item.products?.length" class="package-home-products">
             <span class="package-home-products-label">关联商品</span>
             <span v-for="product in item.products.slice(0, 2)" :key="product.id" class="package-home-product">
