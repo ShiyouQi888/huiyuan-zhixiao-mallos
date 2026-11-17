@@ -141,10 +141,7 @@ export class EquityService {
     const usages = await this.deductFIFO(fromId, amount, 'equity_transfer_out', transferNo, 4);
     if (!usages.length) throw new BusinessException(3001, '权益值余额不足');
     // 权益值 = 转账/可转出额度：转出后额度归零即视为用完，标记暂停计酬（等待复消恢复）
-    const account = await this.prisma.equityAccount.findUnique({ where: { userId: fromId } });
-    if (account && account.balance <= 0n) {
-      await this.prisma.user.updateMany({ where: { id: fromId }, data: { equityStatus: 1 } });
-    }
+    await this.markSuspendIfExhausted(fromId);
     const earliestExpireAt = usages.reduce(
       (min, u) => (u.expireAt < min ? u.expireAt : min),
       usages[0].expireAt,
@@ -167,6 +164,15 @@ export class EquityService {
       where: { userId: fromId },
       data: { totalTransferOut: { increment: amount } },
     });
+  }
+
+  /** 额度用完（余额归零）→ 标记暂停计酬，等待复消恢复 */
+  async markSuspendIfExhausted(userId: bigint, transaction?: Prisma.TransactionClient): Promise<void> {
+    const tx = transaction ?? this.prisma;
+    const account = await tx.equityAccount.findUnique({ where: { userId } });
+    if (account && account.balance <= 0n) {
+      await tx.user.updateMany({ where: { id: userId }, data: { equityStatus: 1 } });
+    }
   }
 
   /** 转账超时/拒绝：把冻结的批次还回去（到期日不变，不延长平台负债） */

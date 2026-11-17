@@ -586,7 +586,7 @@ export function Members() {
               <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ProfileMetric label="当前钱包余额" value={fmtMoney(managedMember?.wallet?.balance)} icon={<Wallet size={15} />} />
-                  <ProfileMetric label="当前转账额度（权益值）" value={fmtMoney(managedMember?.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
+                  <ProfileMetric label="当前权益值余额" value={fmtMoney(managedMember?.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="充值金额（元）" required hint="仅允许正整数，写入钱包流水">
@@ -677,7 +677,7 @@ export function Members() {
                 value={fmtMoney(Number(profile.wallet?.balance ?? 0) - Number(profile.wallet?.frozen ?? 0))}
                 icon={<Wallet size={15} />}
               />
-              <ProfileMetric label="转账额度（权益值）" value={fmtMoney(profile.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
+              <ProfileMetric label="权益值余额" value={fmtMoney(profile.equityAccount?.balance)} icon={<CircleDollarSign size={15} />} />
             </div>
 
             <Card>

@@ -82,7 +82,7 @@ function logout() {
       </button>
       <button v-if="canSeeEquity" type="button" class="profile-asset-card profile-asset-card--equity" @click="router.push('/assets')">
         <span class="profile-asset-icon"><BadgeCheck :size="17" aria-hidden="true" /></span>
-        <div><small>转账额度</small><strong>{{ money(store.profile?.equityAccount?.balance) }}</strong></div>
+        <div><small>可用权益值</small><strong>{{ money(store.profile?.equityAccount?.balance) }}</strong></div>
       </button>
     </div>
 

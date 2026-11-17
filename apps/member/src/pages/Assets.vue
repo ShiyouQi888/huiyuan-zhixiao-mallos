@@ -175,12 +175,12 @@ onMounted(load);
     </section>
 
     <section v-else-if="tab === 'equity'" class="asset-overview asset-overview--equity">
-      <div class="asset-overview-top"><span class="asset-icon"><BadgeDollarSign :size="19" aria-hidden="true" /></span><span>可用转账额度（权益值）</span></div>
+      <div class="asset-overview-top"><span class="asset-icon"><BadgeDollarSign :size="19" aria-hidden="true" /></span><span>可用权益值</span></div>
       <div class="asset-balance">{{ money(equity?.balance) }}</div>
       <div class="asset-overview-foot">
-        <span>{{ equity?.lots?.length ?? 0 }} 个有效批次</span><span>按到期时间优先转出</span>
+        <span>{{ equity?.lots?.length ?? 0 }} 个有效批次</span><span>按到期时间优先抵扣</span>
       </div>
-      <p class="asset-description">权益值是可转账/可转出的额度，不参与消费抵扣；额度用完后可通过复消恢复计酬。</p>
+      <p class="asset-description">权益值可用于下单抵扣与会员间转账，额度用完后可通过复消恢复计酬。</p>
       <button v-if="store.has('equity.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="error = ''; showTransfer = true">发起转让</button>
       <button v-else-if="store.has('equity.transfer')" type="button" class="asset-transfer-button" @click="router.push('/security/transfer-password')">设置支付密码</button>
       <div v-if="equity?.lots?.length" class="equity-lots">

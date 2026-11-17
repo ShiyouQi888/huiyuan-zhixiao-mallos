@@ -92,7 +92,7 @@ onMounted(async () => {
         <div class="icon-tile icon-tile--green" style="width:40px;height:40px"><ShoppingBag :size="19" aria-hidden="true" /></div>
         <div>
           <div style="font-size:13px;font-weight:600">商品商城</div>
-          <div class="subtitle" style="font-size:11px;margin-top:3px">会员专属价 · 余额支付</div>
+          <div class="subtitle" style="font-size:11px;margin-top:3px">会员专属价 · 权益值可抵扣</div>
         </div>
       </div>
       <ChevronRight :size="18" class="muted" aria-hidden="true" />
@@ -103,7 +103,7 @@ onMounted(async () => {
     <div v-for="p in packages" :key="p.id" class="card row between" style="padding:15px 18px">
       <div>
         <div style="font-weight:600">{{ p.name }}</div>
-        <div class="subtitle" style="font-size:11px;margin-top:4px">转账额度 ¥{{ money(p.equityValue) }} · 12个月有效</div>
+        <div class="subtitle" style="font-size:11px;margin-top:4px">权益值 ¥{{ money(p.equityValue) }} · 12个月有效</div>
       </div>
       <div style="text-align:right">
         <div class="accent" style="font-weight:650">¥{{ money(p.price) }}</div>

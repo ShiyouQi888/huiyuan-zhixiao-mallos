@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { api, money, post } from '../api';
+import { api, money, post, resolveAssetUrl } from '../api';
 import { useUserStore } from '../stores/user';
 import { Toast } from './_toast';
 import PageHeading from '../components/PageHeading.vue';
 import EmptyState from '../components/EmptyState.vue';
 import AppModal from '../components/AppModal.vue';
-import { BadgeCheck, Check, Crown, RefreshCw, Sparkles, TrendingUp } from 'lucide-vue-next';
+import { BadgeCheck, Check, Crown, Package, ShoppingBag, Sparkles } from 'lucide-vue-next';
 
 const router = useRouter();
 const store = useUserStore();
 const packages = ref<any[]>([]);
 const profile = ref<any>(null);
 const selected = ref<{ item: any; mode: 'purchase' | 'upgrade' | 'repurchase' } | null>(null);
+const useEquity = ref(true);
 const useBalance = ref(true);
 const busy = ref(false);
 const loading = ref(true);
@@ -52,8 +53,9 @@ const visiblePackages = computed(() => packages.value.filter((item) => {
 }));
 const profileStatusLabel = computed(() => {
   if (!currentPackage.value) return '尚未开通会员档位';
-  return profile.value?.equityStatus === 1 ? '转账额度已用完 · 可复消恢复计酬' : '会员权益正常';
+  return profile.value?.equityStatus === 1 ? '权益值已用完 · 可复消恢复计酬' : '会员权益正常';
 });
+const canUseEquity = computed(() => store.has('equity.account'));
 const canUseBalance = computed(() => store.has('wallet.account'));
 
 async function load() {
@@ -62,6 +64,7 @@ async function load() {
   try {
     await store.loadProfile();
     profile.value = store.profile;
+    useEquity.value = canUseEquity.value;
     useBalance.value = canUseBalance.value;
     packages.value = await api<any[]>('/packages');
   } catch (e: any) {
@@ -92,6 +95,7 @@ async function buy() {
     const order = await post('/orders', {
       type: selected.value.mode === 'upgrade' ? 2 : selected.value.mode === 'repurchase' ? 3 : 1,
       packageId: selected.value.item.id,
+      useEquity: useEquity.value,
       useBalance: useBalance.value,
     });
     Toast(`${selectedModeLabel.value}订单 ${order.orderNo} 已创建`, 'success');
@@ -118,7 +122,7 @@ async function buy() {
       </div>
       <div v-if="currentPackage" class="current-membership-meta">
         <span>档位价格 <strong>¥{{ money(currentPackage.price) }}</strong></span>
-        <span>转账额度 <strong>¥{{ money(profile.equityAccount?.balance ?? 0) }}</strong></span>
+        <span>权益值 <strong>¥{{ money(profile.equityAccount?.balance ?? 0) }}</strong></span>
       </div>
     </section>
 
@@ -141,9 +145,28 @@ async function buy() {
         <div class="package-price">¥{{ money(item.price) }}</div>
         <div class="package-duration">有效期 {{ item.durationDays }} 天</div>
         <div class="package-benefit">
-          <div><BadgeCheck :size="15" aria-hidden="true" /> 获得转账额度（权益值）</div>
+          <div><BadgeCheck :size="15" aria-hidden="true" /> 获得权益值</div>
           <strong>¥{{ money(item.equityValue) }}</strong>
         </div>
+        <section class="package-products" :aria-label="`${item.name}关联商品`">
+          <div class="package-products-heading">
+            <span><ShoppingBag :size="14" aria-hidden="true" /> 该档位可购商品</span>
+            <span>{{ item.products?.length ?? 0 }} 件</span>
+          </div>
+          <div v-if="item.products?.length" class="package-product-list">
+            <div v-for="product in item.products" :key="product.id" class="package-product">
+              <img v-if="product.images?.[0]" :src="resolveAssetUrl(product.images[0])" :alt="product.name" loading="lazy" />
+              <span v-else class="package-product-placeholder"><Package :size="20" aria-hidden="true" /></span>
+              <div class="package-product-copy">
+                <strong>{{ product.name }}</strong>
+                <span v-if="product.subtitle">{{ product.subtitle }}</span>
+                <span class="package-product-price">¥{{ money(product.effectivePrice) }}<del v-if="Number(product.originalPrice) > Number(product.effectivePrice)">¥{{ money(product.originalPrice) }}</del></span>
+              </div>
+              <span v-if="product.stock <= 0" class="package-product-stock">缺货</span>
+            </div>
+          </div>
+          <div v-else class="package-products-empty">该档位暂未关联可购商品</div>
+        </section>
         <div v-if="item.items?.length" class="package-item-list">
           <span v-for="benefit in item.items" :key="benefit.name"><Check :size="13" aria-hidden="true" /> {{ benefit.name }}</span>
         </div>
@@ -162,16 +185,21 @@ async function buy() {
 
     <div class="package-note">
       <BadgeCheck :size="15" aria-hidden="true" />
-      <span>下单以钱包余额抵扣；权益值是可转账/可转出的额度，不参与消费抵扣，额度用完后可通过复消恢复。</span>
+      <span>下单时可选择使用权益值与钱包余额抵扣；权益值也可会员间转账，额度用完后可通过复消恢复。</span>
     </div>
 
     <AppModal v-model="confirmOpen" eyebrow="订单确认" :title="`${selectedModeLabel} · ${selected?.item.name ?? ''}`"
       description="核对本次应付金额与到账权益值后提交订单。" :confirm-loading="busy"
       :confirm-text="`确认提交 · ¥${money(selectedAmount)}`"
-      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，新增权益值为两个档位权益值之差。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后恢复计酬并重新获得转账额度。' : '提交后将创建订单；本单以钱包余额抵扣，剩余金额以订单为准。'" @confirm="buy">
+      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，新增权益值为两个档位权益值之差。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后恢复计酬并重新获得权益值。' : '提交后将创建订单；权益值与钱包余额按规则抵扣，剩余金额以订单为准。'" @confirm="buy">
       <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '档位差额' : '档位金额' }}</span><strong>¥{{ money(selectedAmount) }}</strong></div>
-      <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '新增额度' : '到账额度（权益值）' }}</span><strong class="green">¥{{ money(selectedEquity) }}</strong></div>
+      <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '新增权益值' : '到账权益值' }}</span><strong class="green">¥{{ money(selectedEquity) }}</strong></div>
       <div v-if="selected?.mode === 'upgrade'" class="order-summary-row"><span>升级后档位</span><strong>{{ selected?.item.name }}</strong></div>
+      <label v-if="canUseEquity" class="deduction-option">
+        <input v-model="useEquity" type="checkbox" />
+        <span>使用权益值抵扣</span>
+        <span class="deduction-check"><Check :size="13" /></span>
+      </label>
       <label v-if="canUseBalance" class="deduction-option">
         <input v-model="useBalance" type="checkbox" />
         <span>使用钱包余额抵扣</span>
@@ -204,6 +232,20 @@ async function buy() {
 .package-benefit { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .package-benefit div { display: inline-flex; align-items: center; gap: 6px; }
 .package-benefit strong { color: var(--green); font-size: 13px; }
+.package-products { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.package-products-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 10px; }
+.package-products-heading > span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 650; }
+.package-products-heading svg { color: var(--accent); }
+.package-product-list { display: grid; gap: 8px; margin-top: 9px; }
+.package-product { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
+.package-product > img, .package-product-placeholder { display: flex; width: 42px; height: 42px; flex: 0 0 auto; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: var(--surface); color: var(--muted); object-fit: cover; }
+.package-product-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.package-product-copy strong { overflow: hidden; color: var(--text); font-size: 10.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.package-product-copy > span:not(.package-product-price) { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.package-product-price { display: flex; align-items: baseline; gap: 6px; color: var(--accent); font-family: var(--font-num); font-size: 10px; font-weight: 700; }
+.package-product-price del { color: var(--muted); font-size: 9px; font-weight: 400; }
+.package-product-stock { flex: 0 0 auto; color: var(--danger); font-size: 9px; }
+.package-products-empty { margin-top: 9px; padding: 12px 8px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); font-size: 9.5px; text-align: center; }
 .package-item-list { display: grid; gap: 7px; margin-top: 12px; }
 .package-item-list span { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 10px; }
 .package-item-list svg { color: var(--green); }

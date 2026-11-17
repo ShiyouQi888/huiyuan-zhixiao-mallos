@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   const team = await api<any[]>('/api/me/team', { token: parent.token });
   check('直属下级包含新注册用户', team.some((u) => u.phone === childPhone));
 
-  // 3. 下级购买金卡（权益值为转账额度不参与抵扣，管理端充值钱包后全额余额抵扣）
+  // 3. 下级购买金卡（新账号尚无权益值，管理端充值钱包后全额余额抵扣）
   console.log('\n[3] 下单与权益值发放');
   const childInfo = await api<any>('/api/me', { token: child.token });
   await api(`/api/admin/wallets/${childInfo.id}/adjust`, {

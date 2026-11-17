@@ -485,21 +485,21 @@ async function main(): Promise<void> {
       records.list,
     );
 
-    /* ---------- 14. 权益值 = 转账/可转出额度：用完暂停计酬，复消恢复 ---------- */
-    console.log('\n[14] 权益值 = 转账额度（不参与下单抵扣；用完 → 暂停计酬；复消恢复）');
+    /* ---------- 14. 权益值：可下单抵扣 / 可转账 / 用完暂停 / 复消恢复 ---------- */
+    console.log('\n[14] 权益值：可下单抵扣、可转账（用完 → 暂停计酬；复消恢复）');
     const eqFromTag = 'L1';
     const eqToTag = 'L2';
     const eqFrom = accounts.get(eqFromTag)!;
     const eqTo = accounts.get(eqToTag)!;
 
-    // 下单只扣钱包余额，权益值应保持购卡获赠的 60000 不变
+    // 购卡订单以钱包支付，权益值应保持获赠的 60000 不变
     const [eqBefore, eqToBefore] = await Promise.all([
       api<any>('/api/me/equity', { token: eqFrom.token }),
       api<any>('/api/me/equity', { token: eqTo.token }),
     ]);
     const eqTotal = num(eqBefore.balance);
     check(
-      `${eqFromTag} 购卡获赠权益值 ${eqTotal}，下单不抵扣权益值`,
+      `${eqFromTag} 购卡获赠权益值 ${eqTotal}`,
       eqTotal === 60000 && num(eqBefore.totalGranted) === 60000,
       { balance: eqTotal, totalGranted: num(eqBefore.totalGranted) },
     );
@@ -511,6 +511,35 @@ async function main(): Promise<void> {
       '权益值尚未用完',
     );
     check(`${eqToTag} 额度未用完时复消被拒`, rejectMsg === '', rejectMsg);
+
+    // 下单抵扣：普通商品（无线蓝牙耳机 399）用权益值支付
+    const GOODS_ID = 3;
+    const GOODS_AMOUNT = 399;
+    const address = await api<any>('/api/me/addresses', {
+      method: 'POST',
+      token: eqFrom.token,
+      body: {
+        receiver: 'E2E L1', phone: eqFrom.phone, province: '北京市', city: '北京市',
+        district: '朝阳区', detail: '某路 1 号', isDefault: true,
+      },
+    });
+    const goodsOrder = await api<any>('/api/orders', {
+      method: 'POST',
+      token: eqFrom.token,
+      body: { type: 4, productId: GOODS_ID, addressId: String(address.id), quantity: 1, useEquity: true, useBalance: false },
+    });
+    check(
+      `${eqFromTag} 下单使用权益值抵扣 ${GOODS_AMOUNT}`,
+      num(goodsOrder.equityDeduct) === GOODS_AMOUNT && num(goodsOrder.balanceDeduct) === 0,
+      goodsOrder,
+    );
+    const eqAfterGoods = await api<any>('/api/me/equity', { token: eqFrom.token });
+    const eqRemain = eqTotal - GOODS_AMOUNT;
+    check(
+      `${eqFromTag} 抵扣后权益值余额 ${eqRemain}`,
+      num(eqAfterGoods.balance) === eqRemain,
+      num(eqAfterGoods.balance),
+    );
 
     // 转出方实名 + 转账支付密码
     await api('/api/me/realname', {
@@ -528,7 +557,7 @@ async function main(): Promise<void> {
     const eqTransfer = await api<any>('/api/me/equity/transfers', {
       method: 'POST',
       token: eqFrom.token,
-      body: { toPhone: eqTo.phone, amount: eqTotal, paymentPassword: '654321', remark: 'E2E 权益值全额转出' },
+      body: { toPhone: eqTo.phone, amount: eqRemain, paymentPassword: '654321', remark: 'E2E 权益值全额转出' },
     });
     check('新账号大额权益值转出触发人工复核标记', eqTransfer.riskFlag === 1, eqTransfer);
 
@@ -554,8 +583,8 @@ async function main(): Promise<void> {
 
     const eqToAfter = await api<any>('/api/me/equity', { token: eqTo.token });
     check(
-      `${eqToTag} 接收方权益值增加 ${eqTotal}`,
-      num(eqToAfter.balance) - num(eqToBefore.balance) === eqTotal,
+      `${eqToTag} 接收方权益值增加 ${eqRemain}`,
+      num(eqToAfter.balance) - num(eqToBefore.balance) === eqRemain,
       { before: num(eqToBefore.balance), after: num(eqToAfter.balance) },
     );
 

@@ -99,19 +99,35 @@ export class OrderService {
         throw Err.param('订单类型不合法');
       }
 
-      // 权益值只作转账/可转出额度，不用于下单抵扣
-      const equityDeduct = 0n;
+      // 权益值为可消费/可转出的额度：下单先按 FIFO 抵扣权益值，再用钱包余额
+      let equityDeduct = 0n;
       let balanceDeduct = 0n;
-      const rest = amount;
+      if (params.useEquity !== false) {
+        const [account, activeLots] = await Promise.all([
+          tx.equityAccount.findUnique({ where: { userId: params.userId } }),
+          tx.equityLot.aggregate({ where: { userId: params.userId, status: 'ACTIVE', remaining: { gt: 0n } }, _sum: { remaining: true } }),
+        ]);
+        const lotBalance = activeLots._sum.remaining ?? 0n;
+        const accountBalance = account?.balance ?? 0n;
+        const usableEquity = lotBalance < accountBalance ? lotBalance : accountBalance;
+        equityDeduct = usableEquity < amount ? usableEquity : amount;
+        if (equityDeduct > 0n) {
+          await this.equity.deductFIFO(params.userId, equityDeduct, 'order_equity', no, 2, tx);
+          // 额度因消费归零同样视为「用完」，标记暂停计酬（等待复消恢复）
+          await this.equity.markSuspendIfExhausted(params.userId, tx);
+        }
+      }
+
+      const rest = amount - equityDeduct;
       if (rest > 0n && params.useBalance !== false) {
         const account = await this.wallet.get(params.userId, tx);
         const available = account.balance - account.frozen;
         balanceDeduct = available < rest ? available : rest;
         if (balanceDeduct > 0n) await this.wallet.debit(params.userId, balanceDeduct, 'order_balance', no, `订单 ${no} 余额抵扣`, tx);
       }
-      const cashPay = amount - balanceDeduct;
+      const cashPay = amount - equityDeduct - balanceDeduct;
       if (cashPay > 0n) {
-        throw Err.conflict('订单仍需现金支付，但系统尚未配置现金支付渠道。请充值钱包余额后重试');
+        throw Err.conflict('订单仍需现金支付，但系统尚未配置现金支付渠道。请调整权益值或钱包抵扣后重试');
       }
       const order = await tx.order.create({
         data: {
