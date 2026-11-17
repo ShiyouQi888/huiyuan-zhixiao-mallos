@@ -212,7 +212,7 @@ function categoryTone(index: number) {
             <span v-if="item.products.length > 2" class="package-home-products-more">+{{ item.products.length - 2 }}</span>
           </span>
           <span v-else class="package-home-products-empty">暂未关联商品</span>
-          <span class="package-home-duration">有效期 {{ item.durationDays }} 天</span>
+          <span class="package-home-duration">一次买断 · 终身有效</span>
         </button>
       </div>
     </section>

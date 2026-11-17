@@ -27,7 +27,6 @@ model User {
   inviteCode           String    @unique @db.VarChar(32)
 
   packageId            Int?
-  packageExpireAt      DateTime?
   rankId               Int       @default(0)
   rankLevel            Int       @default(0)
   rankAchievedAt       DateTime?
@@ -153,7 +152,6 @@ model Package {
   pv           BigInt   @default(0)
   /// 标准权益通值，按档位PV × 3派生；账户发放额以支付成功时的PV快照计算
   transferQuota BigInt
-  durationDays Int      @default(365)
   /// 为空时继承全局 bonus.reward_rate；以比例存储，如 1.0 = 100%
   directRewardRate     Decimal? @db.Decimal(5, 4)
   /// 为空时继承全局 bonus.repurchase_rate

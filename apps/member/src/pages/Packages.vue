@@ -140,7 +140,7 @@ async function buy() {
           <div class="package-mark"><Sparkles :size="19" aria-hidden="true" /></div>
         </div>
         <div class="package-price">¥{{ money(item.price) }}</div>
-        <div class="package-duration">有效期 {{ item.durationDays }} 天 · 计酬 PV {{ Number(item.pv ?? 0).toLocaleString('zh-CN') }}</div>
+        <div class="package-duration">一次买断 · 终身有效 · 计酬 PV {{ Number(item.pv ?? 0).toLocaleString('zh-CN') }}</div>
         <div class="package-benefit">
           <div><BadgeCheck :size="15" aria-hidden="true" /> 权益通</div>
           <strong>{{ money(Number(item.pv ?? 0) * 3) }}</strong>

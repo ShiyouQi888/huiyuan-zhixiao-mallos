@@ -45,14 +45,13 @@ export class AdminExtendedController {
 
   @Post('packages')
   @Roles('SUPER_ADMIN')
-  async createPackage(@Body() body: { id: number; name: string; level: number; price: number; pv?: number; transferQuota?: number; durationDays?: number }) {
+  async createPackage(@Body() body: { id: number; name: string; level: number; price: number; pv?: number; transferQuota?: number }) {
     const pv = this.packagePv(body.pv ?? body.price);
     await this.assertPackagePvOrder(body.level, pv);
     return this.prisma.package.create({
       data: {
         id: body.id, name: body.name, level: body.level,
         price: BigInt(body.price), pv, transferQuota: pv * 3n,
-        durationDays: body.durationDays ?? 365,
       },
     });
   }
@@ -62,7 +61,7 @@ export class AdminExtendedController {
   async updatePackage(
     @Param('id') id: string,
     @Body() body: Partial<{
-      name: string; price: number; pv: number; transferQuota: number; durationDays: number; status: number;
+      name: string; price: number; pv: number; transferQuota: number; status: number;
       directRewardRate: number | null; repurchaseRewardRate: number | null; directReleaseDays: number | null;
     }>,
     @CurrentUser() operator: CurrentUserPayload,
@@ -87,7 +86,6 @@ export class AdminExtendedController {
       ...(body.price !== undefined ? { price: BigInt(body.price) } : {}),
       ...(pv !== undefined ? { pv } : {}),
       transferQuota,
-      ...(body.durationDays !== undefined ? { durationDays: body.durationDays } : {}),
       ...(body.status !== undefined ? { status: body.status } : {}),
       ...(directRewardRate !== undefined ? { directRewardRate } : {}),
       ...(repurchaseRewardRate !== undefined ? { repurchaseRewardRate } : {}),
@@ -263,7 +261,7 @@ export class AdminExtendedController {
       where: { id: BigInt(id) },
       select: {
         id: true, phone: true, nickname: true, inviteCode: true, packageId: true,
-        packageExpireAt: true, rankId: true, rankLevel: true, rankAchievedAt: true,
+        rankId: true, rankLevel: true, rankAchievedAt: true,
         totalTeamPerformance: true, parentId: true, depth: true, transferQuotaStatus: true,
         peerBonusLocked: true, realNameStatus: true, status: true, createdAt: true,
         rank: { select: { name: true, level: true } },

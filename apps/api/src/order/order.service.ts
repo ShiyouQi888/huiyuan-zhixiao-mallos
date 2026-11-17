@@ -94,13 +94,10 @@ export class OrderService implements OnModuleInit {
 
     const pkg = order.packageId ? await tx.package.findUnique({ where: { id: order.packageId } }) : null;
     if (!pkg) throw Err.conflict('订单档位信息不存在，无法登记支付权益');
+    // 档位为「一次买断、终身有效」的身份，只记录 packageId，不写入任何到期时间
     await tx.user.update({
       where: { id: order.userId },
-      data: {
-        packageId: pkg.id,
-        packageExpireAt: new Date(paidAt.getTime() + pkg.durationDays * 86400_000),
-        transferQuotaStatus: 0,
-      },
+      data: { packageId: pkg.id, transferQuotaStatus: 0 },
     });
 
     let grantAmount = pkg.pv * 3n;
@@ -219,7 +216,7 @@ export class OrderService implements OnModuleInit {
       let amount = 0n;
       let pvAmount = 0n;
       let itemPv = 0n;
-      let packageRow: { id: number; level: number; price: bigint; transferQuota: bigint; durationDays: number } | null = null;
+      let packageRow: { id: number; level: number; price: bigint; transferQuota: bigint } | null = null;
       let shippingAddress: { receiver: string; phone: string; province: string; city: string; district: string; detail: string } | null = null;
       let productName: string | null = null;
       const quantity = Number(params.quantity ?? 1);

@@ -25,7 +25,6 @@ interface MemberTreeNode {
 
 interface MemberProfile extends Omit<Member, 'wallet' | 'transferQuotaAccount'> {
   id: string;
-  packageExpireAt?: string | null;
   depth: number;
   realNameStatus: number;
   realName?: string | null;
@@ -998,7 +997,7 @@ export function Members() {
                 <KeyValue label="邀请码" value={profile.inviteCode} mono />
                 <KeyValue label="会员等级" value={profile.rank?.name ?? rankName(profile.rankLevel)} />
                 <KeyValue label="当前档位" value={profile.package?.name ?? '普通用户'} />
-                <KeyValue label="档位到期时间" value={profile.packageExpireAt ? fmtDate(profile.packageExpireAt) : '—'} />
+                <KeyValue label="档位有效性" value={profile.packageId ? '终身有效（一次买断）' : '未购卡'} />
                 <KeyValue label="直接推荐人" value={profile.parent?.nickname ?? '无'} />
                 <KeyValue label="关系层级" value={`第 ${profile.depth} 层`} />
                 <KeyValue label="注册时间" value={fmtDate(profile.createdAt)} />

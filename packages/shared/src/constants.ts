@@ -62,14 +62,13 @@ export interface PackageSeed {
   name: string;
   price: number;
   transferQuota: number;
-  durationDays: number;
 }
 
 export const PACKAGE_SEEDS: PackageSeed[] = [
-  { level: 1, name: '银卡', price: 2000, transferQuota: 6000, durationDays: 365 },
-  { level: 2, name: '金卡', price: 5000, transferQuota: 15000, durationDays: 365 },
-  { level: 3, name: '钻卡', price: 10000, transferQuota: 30000, durationDays: 365 },
-  { level: 4, name: '至尊卡', price: 20000, transferQuota: 60000, durationDays: 365 },
+  { level: 1, name: '银卡', price: 2000, transferQuota: 6000 },
+  { level: 2, name: '金卡', price: 5000, transferQuota: 15000 },
+  { level: 3, name: '钻卡', price: 10000, transferQuota: 30000 },
+  { level: 4, name: '至尊卡', price: 20000, transferQuota: 60000 },
 ];
 
 /* ---------------- 等级初始化数据 ---------------- */
