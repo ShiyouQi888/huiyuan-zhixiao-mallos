@@ -487,9 +487,14 @@ export class SettlementService {
         }),
       ]);
 
-    const sum = (rows: Array<{ balance?: bigint; frozen?: bigint }>) =>
-      rows.reduce((s, r) => s + (r.balance ?? 0n) + (r.frozen ?? 0n), 0n);
-    const walletTotal = sum(wallets);
+    // 冻结资金在「发起转账」时已从余额扣减并落了 -amount 流水，
+    // 因此流水合计应与「余额」对齐，而不是「余额 + 冻结」（否则任意待确认转账都会误报）。
+    // 冻结额另有独立恒等式：冻结合计 = 待确认转出金额。
+    const walletBalance = wallets.reduce((s, row) => s + row.balance, 0n);
+    const walletFrozen = wallets.reduce((s, row) => s + row.frozen, 0n);
+    const pendingFrozen = quotaTransfers
+      .filter((row) => row.status === 'PENDING')
+      .reduce((s, row) => s + (row._sum.amount ?? 0n), 0n);
     const expectedByUser = new Map<string, { used: bigint; reserved: bigint }>();
     for (const row of quotaTransfers) {
       const id = row.fromUserId.toString();
@@ -530,8 +535,10 @@ export class SettlementService {
     const checks = [
       { name: '奖金现金 = 钱包奖金流水', ok: cashBonus === (walletType1._sum.changeAmount ?? 0n) },
       { name: '奖金太阳值 = 太阳值批次', ok: tokenBonus === (tokenLots._sum.amount ?? 0n) },
-      { name: '钱包流水合计 = 钱包余额+冻结', ok: (walletSum._sum.changeAmount ?? 0n) === walletTotal,
-        detail: { flow: (walletSum._sum.changeAmount ?? 0n).toString(), balance: walletTotal.toString() } },
+      { name: '钱包流水合计 = 钱包余额', ok: (walletSum._sum.changeAmount ?? 0n) === walletBalance,
+        detail: { flow: (walletSum._sum.changeAmount ?? 0n).toString(), balance: walletBalance.toString() } },
+      { name: '钱包冻结 = 待确认转出金额', ok: walletFrozen === pendingFrozen,
+        detail: { frozen: walletFrozen.toString(), pending: pendingFrozen.toString() } },
       { name: '分红合计 ≤ 分红池总额', ok: (dividendSum._sum.amount ?? 0n) <= (poolSum._sum.poolAmount ?? 0n) },
       { name: '权益通已用/预占 = 钱包转账统计', ok: quotaConsistent },
       { name: '直推奖计划：Σ各期 = 计划总额', ok: directPlanConsistent },

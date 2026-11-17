@@ -1,206 +1,397 @@
 /**
- * 端到端烟雾测试：注册 → 下单 → 日结 → 直推奖入账 → 对账
+ * 端到端烟雾测试（PV 计酬 + 权益通 + 太阳值模型）
+ *
+ * 链路：登录 → 档位/开关 → 注册两级 → 下单（幂等键/余额校验）→ 支付即生效
+ *      → 交付（快递单号）→ 确认收货 → 日结 → 直推奖「先拆后分期」释放
+ *      → 对账 6 项 → 权益通耗尽 → 复消
+ *
  * 用法：先启动 API，再执行 pnpm --filter @solar/api test:smoke
+ * 说明：可重复执行（每次注册独立手机号）；日结会对当日全库数据重算，但不改历史已发奖金。
  */
 import 'dotenv/config';
+import { randomUUID } from 'crypto';
 
 const BASE = process.env.API_BASE_URL ?? 'http://127.0.0.1:3000';
+const ADMIN_PHONE = process.env.SMOKE_ADMIN_PHONE ?? '13800138000';
+const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD ?? '123456';
+const PACKAGE_ID = 4;
+
 let passed = 0;
 let failed = 0;
+const failures: string[] = [];
 
 function check(name: string, condition: boolean, detail?: unknown): void {
   if (condition) {
-    passed++;
+    passed += 1;
     console.log(`  ✓ ${name}`);
   } else {
-    failed++;
-    console.error(`  ✗ ${name}`, detail ?? '');
+    failed += 1;
+    const text = detail === undefined ? '' : JSON.stringify(detail, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+    failures.push(`${name}${text ? ` :: ${text}` : ''}`);
+    console.error(`  ✗ ${name}${text ? ` :: ${text}` : ''}`);
   }
 }
 
 async function api<T = any>(
   path: string,
-  options: { method?: string; body?: unknown; token?: string } = {},
+  options: { method?: string; body?: unknown; token?: string; idempotencyKey?: string } = {},
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: options.method ?? 'GET',
     headers: {
       'Content-Type': 'application/json',
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      ...(options.idempotencyKey ? { 'x-idempotency-key': options.idempotencyKey } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(600_000),
   });
   const json = (await res.json()) as { code: number; message: string; data: T };
   if (json.code !== 0) throw new Error(`${path} 返回错误: ${json.code} ${json.message}`);
   return json.data;
 }
 
-async function main(): Promise<void> {
-  console.log('=== 太阳线会员系统 · 烟雾测试 ===\n');
+const num = (value: unknown): number => Number(value ?? 0);
+/** 列表接口有两种返回：裸数组或 { list, total } */
+const rows = <T = any>(result: unknown): T[] =>
+  Array.isArray(result) ? (result as T[]) : (((result as { list?: T[] } | null)?.list) ?? []);
+const key = (scene: string): string => `${scene}-${randomUUID()}`;
+const plusDays = (days: number): string => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
 
-  // 1. 档位列表（需登录态，先登录管理员）
-  console.log('[1] 档位与功能开关');
-  const admin = await api<{ token: string }>('/api/auth/login', {
-    method: 'POST',
-    body: { phone: '13800138000', password: '123456' },
-  });
-  check('管理员登录成功', !!admin.token);
-
-  const packages = await api<any[]>('/api/packages', { token: admin.token });
-  check('档位数量为 4', packages.length === 4, packages.length);
-  check('金卡价格 5000 / 权益值 15000', packages[1].price === 5000 && packages[1].equityValue === 15000);
-
-  const adminMe = await api<any>('/api/me', { token: admin.token });
-  const features = await api<{ features: any[] }>('/api/features?platform=h5', { token: admin.token });
-  check('功能开关下发 20 项', features.features.length === 20, features.features.length);
-
-  // 2. 注册两级用户
-  console.log('\n[2] 注册与关系绑定');
-  const suffix = String(Date.now()).slice(-8);
-  const parentPhone = `137${suffix}`;
-  const childPhone = `136${suffix}`;
-  const parent = await api<{ token: string }>('/api/auth/register', {
-    method: 'POST',
-    body: { phone: parentPhone, password: '123456', nickname: '烟雾测试上级', inviteCode: adminMe.inviteCode },
-  });
-  const parentInfo = await api<any>('/api/me', { token: parent.token });
-  check('上级绑定到管理员', parentInfo.inviteCode !== adminMe.inviteCode);
-
-  const child = await api<{ token: string }>('/api/auth/register', {
-    method: 'POST',
-    body: { phone: childPhone, password: '123456', nickname: '烟雾测试下级', inviteCode: parentInfo.inviteCode },
-  });
-  const team = await api<any[]>('/api/me/team', { token: parent.token });
-  check('直属下级包含新注册用户', team.some((u) => u.phone === childPhone));
-
-  // 3. 下级购买金卡（新账号尚无权益值，管理端充值钱包后全额余额抵扣）
-  console.log('\n[3] 下单与权益值发放');
-  const childInfo = await api<any>('/api/me', { token: child.token });
-  await api(`/api/admin/wallets/${childInfo.id}/adjust`, {
-    method: 'POST', token: admin.token, body: { amount: 5000, reason: '烟雾测试充值购卡钱包' },
-  });
-  const order = await api<any>('/api/orders', {
-    method: 'POST',
-    token: child.token,
-    body: { type: 1, packageId: 2, useBalance: true },
-  });
-  check('订单已付款并等待管理端交付（status=1）', order.status === 1, order.status);
-  check('订单金额 5000 全额钱包余额抵扣', order.amount === 5000 && order.balanceDeduct === 5000 && order.equityDeduct === 0, order);
-
-  await api(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
-    method: 'POST', token: admin.token,
-  });
-  const completedOrder = await api<any>(`/api/orders/${encodeURIComponent(order.orderNo)}/confirm`, {
-    method: 'POST', token: child.token,
-  });
-  check('管理端交付后会员确认完成（status=3）', completedOrder.status === 3, completedOrder.status);
-
-  const childEquity = await api<any>('/api/me/equity', { token: child.token });
-  check('权益值发放 15000 = 5000×3', childEquity.balance === 15000, childEquity.balance);
-  check('权益值批次有效期 12 个月', childEquity.lots.length === 1 && childEquity.lots[0].remaining === 15000);
-
-  const childRank = await api<any>('/api/me/rank', { token: child.token });
-  check('下级等级为普通会员', childRank.rankLevel === 0);
-
-  // 4. 日结（业绩日 + 直推奖释放日）
-  console.log('\n[4] 每日结算');
-  const today = new Date();
-  const perfDate = today.toISOString().slice(0, 10);
-  // 直推奖第 1 期到期 = 订单完成日次日 UTC 00:00，结算该日即可释放第 1 期（不会带上第 2 期）
-  const releaseDate = new Date(today.getTime() + 86400_000).toISOString().slice(0, 10);
-
-  // 超管走审批流会单人直通，返回 { direct: true, result: {...} }
-  const settleResult = (r: any) => (r.result ?? r);
-  const r1 = await api<any>('/api/admin/settlements/daily/rerun', {
-    method: 'POST', token: admin.token, body: { date: perfDate },
-  });
-  check('业绩日日结完成', settleResult(r1).step === 11, r1);
-
-  const r2 = await api<any>('/api/admin/settlements/daily/rerun', {
-    method: 'POST', token: admin.token, body: { date: releaseDate },
-  });
-  check('直推奖释放日日结完成', settleResult(r2).step === 11 || settleResult(r2).skipped, r2);
-
-  const r3 = await api<any>('/api/admin/settlements/daily/rerun', {
-    method: 'POST', token: admin.token, body: { date: perfDate },
-  });
-  check('日结重跑可重入', settleResult(r3).step === 11, r3);
-
-  // 5. 直推奖入账验证
-  console.log('\n[5] 直推奖入账');
-  const parentWallet = await api<any>('/api/me/wallet', { token: parent.token });
-  check('上级钱包收到 250×70% = 175', parentWallet.balance === 175, parentWallet.balance);
-
-  const parentToken = await api<any>('/api/me/token', { token: parent.token });
-  check('上级数权记账 250×30% = 75', parentToken.total === 75, parentToken.total);
-
-  const bonusRecords = await api<any>('/api/me/bonus/records', { token: parent.token });
-  const direct = bonusRecords.list.find((r: any) => r.type === 1);
-  check('存在直推奖记录', !!direct, bonusRecords.list);
-  check('直推奖金额 250（5000÷20）', direct?.amount === 250, direct?.amount);
-
-  const parentRank = await api<any>('/api/me/rank', { token: parent.token });
-  check('上级团队累计业绩 = 5000', parentRank.totalPerformance === 5000, parentRank.totalPerformance);
-
-  // 6. 对账
-  console.log('\n[6] 账务对账');
-  const recon = await api<any>('/api/admin/settlements/reconcile', {
-    method: 'POST', token: admin.token, body: { date: perfDate },
-  });
-  check('5 项对账恒等式全部成立', recon.allPassed === true, recon.checks);
-
-  // 7. 收益周期汇总与明细分页
-  console.log('\n[7] 收益汇总与分页');
-  const periods = await api<any>('/api/me/bonus/periods', { token: parent.token });
-  check('今日/本月汇总结构完整', periods.today && periods.month && typeof periods.today.amount === 'number', periods);
-  check('本月汇总含直推奖金额', periods.month.amount >= 250, periods.month.amount);
-
-  const paged = await api<any>('/api/me/bonus/records?page=1', { token: parent.token });
-  check('明细分页返回 page/pageSize', paged.page === 1 && paged.pageSize === 20, paged);
-
-  const filtered = await api<any>('/api/me/bonus/records?type=1&page=1', { token: parent.token });
-  check('按类型筛选仅返回直推奖', filtered.list.every((r: any) => r.type === 1), filtered.list);
-
-  // 8. 会员间转账：发起 → 查询 → 确认接收
-  console.log('\n[8] 钱包转账与确认接收');
-  await api('/api/me/realname', {
-    method: 'POST', token: parent.token, body: { realName: '烟雾测试', idCard: '110101199001010011' },
-  });
-  await api('/api/me/transfer-password', {
-    method: 'POST', token: parent.token, body: { newPassword: '123456' },
-  });
-  const transfer = await api<any>('/api/me/wallet/transfers', {
-    method: 'POST', token: parent.token,
-    body: { toPhone: childPhone, amount: 10, paymentPassword: '123456' },
-  });
-  check('转账已发起且状态为待确认', transfer.status === 'PENDING', transfer);
-
-  const fromList = await api<any>('/api/me/transfers/wallet?page=1', { token: parent.token });
-  const pending = fromList.list.find((t: any) => t.transferNo === transfer.transferNo);
-  check('转出方查询到待确认转账', !!pending && pending.status === 'PENDING', fromList.list);
-  check('转账记录带对方手机号', pending?.toUser?.phone === childPhone, pending?.toUser);
-
-  const toList = await api<any>('/api/me/transfers/wallet?page=1', { token: child.token });
-  const incoming = toList.list.find((t: any) => t.transferNo === transfer.transferNo);
-  check('接收方查询到待确认转账', !!incoming && incoming.status === 'PENDING', toList.list);
-  check('接收方记录带对方手机号', incoming?.fromUser?.phone === parentPhone, incoming?.fromUser);
-
-  await api(`/api/me/wallet/transfers/${incoming.id}/accept`, { method: 'POST', token: child.token });
-  const childWallet = await api<any>('/api/me/wallet', { token: child.token });
-  check('确认接收后下级余额 +10', childWallet.balance === 10, childWallet.balance);
-
-  const parentWalletAfter = await api<any>('/api/me/wallet', { token: parent.token });
-  check('转出方余额 175-10 = 165', parentWalletAfter.balance === 165, parentWalletAfter.balance);
-
-  const toListAfter = await api<any>('/api/me/transfers/wallet?page=1', { token: child.token });
-  const done = toListAfter.list.find((t: any) => t.transferNo === transfer.transferNo);
-  check('确认后转账状态为已到账', done?.status === 'COMPLETED', done?.status);
-
-  console.log(`\n=== 结果：通过 ${passed} 项，失败 ${failed}项 ===`);
-  if (failed > 0) process.exit(1);
+/** 期望接口抛错且错误信息包含指定文案；返回不符合时的说明 */
+async function expectReject(
+  path: string,
+  options: { method?: string; body?: unknown; token?: string; idempotencyKey?: string },
+  keyword: string,
+): Promise<string> {
+  try {
+    await api(path, options);
+  } catch (error) {
+    const message = (error as Error).message;
+    return message.includes(keyword) ? '' : `抛错但不含「${keyword}」: ${message}`;
+  }
+  return '未抛错';
 }
 
-main().catch((e) => {
-  console.error('烟雾测试异常:', e);
-  process.exit(1);
+async function main(): Promise<void> {
+  console.log('=== 太阳线会员系统 · 烟雾测试（PV / 权益通 / 太阳值）===\n');
+
+  /* ---------- 1. 基础配置 ---------- */
+  const admin = await api<{ token: string }>('/api/auth/login', {
+    method: 'POST',
+    body: { phone: ADMIN_PHONE, password: ADMIN_PASSWORD },
+  });
+  const adminMe = await api<any>('/api/me', { token: admin.token });
+  console.log('[1] 管理员已登录');
+
+  const packages = await api<any[]>('/api/admin/packages', { token: admin.token });
+  const pkg = packages.find((item) => item.id === PACKAGE_ID);
+  if (!pkg) throw new Error(`档位 ${PACKAGE_ID} 不存在，请先执行 pnpm --filter @solar/api prisma:seed`);
+  const PRICE = num(pkg.price);
+  const PV = num(pkg.pv);
+  check('档位数量为 4 且 PV 单调递增',
+    packages.length === 4 && packages.every((item, index) => index === 0 || num(item.pv) > num(packages[index - 1].pv)),
+    packages.map((item) => `${item.name}:${item.pv}`));
+  check(`测试档位 ${pkg.name} 价格 ${PRICE} / PV ${PV} 均为正数`, PRICE > 0 && PV > 0, { PRICE, PV });
+
+  const configs = await api<any[]>('/api/admin/configs', { token: admin.token });
+  const configValue = (configKey: string, fallback: number): number => {
+    const row = configs.find((item) => item.key === configKey);
+    const parsed = Number(row?.value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const cashRatio = configValue('bonus.cash_ratio', 0.7);
+  const rewardRate = configValue('bonus.reward_rate', 1.0);
+  const repurchaseRate = configValue('bonus.repurchase_rate', 0.1);
+  const defaultPeriods = configValue('bonus.direct_periods', 20);
+  const directRate = pkg.directRewardRate === null || pkg.directRewardRate === undefined
+    ? rewardRate : Number(pkg.directRewardRate);
+  const repurchaseRewardRate = pkg.repurchaseRewardRate === null || pkg.repurchaseRewardRate === undefined
+    ? repurchaseRate : Number(pkg.repurchaseRewardRate);
+  const periods = pkg.directReleaseDays === null || pkg.directReleaseDays === undefined
+    ? defaultPeriods : Number(pkg.directReleaseDays);
+
+  const features = await api<{ features: Array<{ code: string }> }>('/api/features?platform=h5', { token: admin.token });
+  const codes = new Set(features.features.map((item) => item.code));
+  check('功能开关下发礼包/权益通/太阳值/转账入口',
+    ['package.purchase', 'wallet.transfer_quota', 'token.view', 'token.transfer', 'wallet.transfer', 'transfer.password']
+      .every((code) => codes.has(code)),
+    [...codes]);
+  check('未实现功能不下发（消息订阅/客服）',
+    !codes.has('notify.subscribe') && !codes.has('customer.service'), [...codes]);
+
+  /* ---------- 2. 注册 ---------- */
+  const runId = String(Date.now()).slice(-8);
+  const parentPhone = `133${runId}`;
+  const childPhone = `134${runId}`;
+  const parentReg = await api<{ token: string; user: { id: string } }>('/api/auth/register', {
+    method: 'POST',
+    body: { phone: parentPhone, password: 'Smoke2026', nickname: 'SM-上级', inviteCode: adminMe.inviteCode },
+  });
+  const parentMe = await api<any>('/api/me', { token: parentReg.token });
+  const childReg = await api<{ token: string; user: { id: string } }>('/api/auth/register', {
+    method: 'POST',
+    body: { phone: childPhone, password: 'Smoke2026', nickname: 'SM-下线', inviteCode: parentMe.inviteCode },
+  });
+  const childMe = await api<any>('/api/me', { token: childReg.token });
+  console.log(`\n[2] 上级 ${parentPhone} / 下线 ${childPhone}`);
+  check('下线推荐人 = 上级', BigInt(childMe.parentId ?? 0) === BigInt(parentReg.user.id), childMe.parentId);
+
+  /* ---------- 3. 下单约束 ---------- */
+  console.log('\n[3] 下单约束与支付即生效');
+  const noKey = await expectReject(
+    '/api/orders',
+    { method: 'POST', token: childReg.token, body: { type: 1, packageId: PACKAGE_ID, useBalance: true } },
+    '幂等键',
+  );
+  check('下单缺少幂等键被拒绝', noKey === '', noKey);
+
+  const noBalance = await expectReject(
+    '/api/orders',
+    {
+      method: 'POST',
+      token: childReg.token,
+      idempotencyKey: key('smoke-nobalance'),
+      body: { type: 1, packageId: PACKAGE_ID, useBalance: true },
+    },
+    '现金支付',
+  );
+  check('钱包余额不足时拒绝（系统无现金支付通道）', noBalance === '', noBalance);
+
+  await api(`/api/admin/wallets/${childReg.user.id}/adjust`, {
+    method: 'POST',
+    token: admin.token,
+    idempotencyKey: key('smoke-wallet'),
+    body: { amount: PRICE, reason: 'SMOKE 充值购卡' },
+  });
+
+  const orderKey = key('smoke-order');
+  const order = await api<any>('/api/orders', {
+    method: 'POST',
+    token: childReg.token,
+    idempotencyKey: orderKey,
+    body: { type: 1, packageId: PACKAGE_ID, useBalance: true },
+  });
+  check(`下单成功：订单 ${order.orderNo} 状态为已支付`, order.status === 1 && !!order.paidAt, order.status);
+  check(`订单 PV 快照 = 档位 PV ${PV}`, num(order.pvAmount) === PV, num(order.pvAmount));
+  check('钱包全额抵扣、现金与权益值抵扣均为 0',
+    num(order.balanceDeduct) === PRICE && num(order.equityDeduct) === 0 && num(order.cashPay) === 0,
+    { balance: num(order.balanceDeduct), equity: num(order.equityDeduct), cash: num(order.cashPay) });
+
+  const replay = await api<any>('/api/orders', {
+    method: 'POST',
+    token: childReg.token,
+    idempotencyKey: orderKey,
+    body: { type: 1, packageId: PACKAGE_ID, useBalance: true },
+  });
+  check('同一幂等键重放返回同一订单', replay.orderNo === order.orderNo, replay.orderNo);
+
+  const childQuota = await api<any>('/api/me/transfer-quota', { token: childReg.token });
+  check(`下线权益通按 PV×3 发放 = ${PV * 3}`,
+    num(childQuota.granted) === PV * 3 && num(childQuota.available) === PV * 3,
+    { granted: num(childQuota.granted), available: num(childQuota.available) });
+
+  /* ---------- 4. 直推奖「先拆」 ---------- */
+  const directTotal = Math.round(PV * directRate);
+  const expectCash = Math.round(directTotal * cashRatio);
+  const expectToken = directTotal - expectCash;
+  const parentToken = await api<any>('/api/me/token', { token: parentReg.token });
+  const parentWallet = await api<any>('/api/me/wallet', { token: parentReg.token });
+  check(`上级太阳值支付即到账 ${expectToken}`, num(parentToken.total) === expectToken, num(parentToken.total));
+  check('上级钱包此时为 0（现金尚未释放）', num(parentWallet.balance) === 0, num(parentWallet.balance));
+
+  const plans = await api<any[]>('/api/admin/bonus/plans', { token: admin.token });
+  const plan = plans.find((item) => item.order?.orderNo === order.orderNo);
+  check('直推奖计划已生成且标记为「先拆」完成', !!plan && plan.splitAt !== null, plan?.splitAt);
+  check(`计划总额 = 现金部分 ${expectCash}（不含太阳值）`,
+    !!plan && num(plan.totalAmount) === expectCash, num(plan?.totalAmount));
+  check(`每期现金 = 现金部分 ÷ ${periods} 期`,
+    !!plan && num(plan.dailyAmount) === Math.floor(expectCash / periods),
+    { daily: num(plan?.dailyAmount), periods: num(plan?.periods) });
+
+  /* ---------- 5. 交付与确认 ---------- */
+  console.log('\n[5] 交付与确认');
+  const noTracking = await expectReject(
+    `/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`,
+    { method: 'POST', token: admin.token, body: {} },
+    '快递单号',
+  );
+  check('交付必须填写快递单号', noTracking === '', noTracking);
+
+  const delivered = await api<any>(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
+    method: 'POST',
+    token: admin.token,
+    body: { trackingNo: `SF${runId}`, shippingCarrier: '顺丰速运' },
+  });
+  check('交付成功：状态转为已发货并写入物流信息',
+    delivered.status === 2 && delivered.trackingNo === `SF${runId}` && delivered.shippingCarrier === '顺丰速运',
+    { status: delivered.status, trackingNo: delivered.trackingNo });
+
+  const completed = await api<any>(`/api/orders/${encodeURIComponent(order.orderNo)}/confirm`, {
+    method: 'POST',
+    token: childReg.token,
+  });
+  check('会员确认收货：状态转为已完成', completed.status === 3, completed.status);
+
+  /* ---------- 6. 日结与分期释放 ---------- */
+  const settleDate = plusDays(0);
+  const releaseDate = plusDays(1);
+  const settle = async (date: string) => {
+    const result = await api<any>('/api/admin/settlements/daily/rerun', {
+      method: 'POST',
+      token: admin.token,
+      body: { date },
+    });
+    return result.result ?? result;
+  };
+  console.log(`\n[6] 日结 ${settleDate} → 次日 ${releaseDate}`);
+  const s1 = await settle(settleDate);
+  check('当日日结跑满 11 步', s1.step === 11, s1);
+
+  // 当日日结可能给上级带来团队/平级/领导/分红等其他收益，
+  // 因此第 1 期释放必须用「日结前后的增量」断言，而不是绝对值。
+  const walletBeforeRelease = await api<any>('/api/me/wallet', { token: parentReg.token });
+  const tokenBeforeRelease = await api<any>('/api/me/token', { token: parentReg.token });
+  const s2 = await settle(releaseDate);
+  check('次日日结跑满 11 步', s2.step === 11, s2);
+
+  const firstStage = Math.floor(expectCash / periods);
+  const parentWallet2 = await api<any>('/api/me/wallet', { token: parentReg.token });
+  const parentToken2 = await api<any>('/api/me/token', { token: parentReg.token });
+  check(`第 1 期现金入钱包 +${firstStage}`,
+    num(parentWallet2.balance) - num(walletBeforeRelease.balance) === firstStage,
+    { before: num(walletBeforeRelease.balance), after: num(parentWallet2.balance) });
+  check(`太阳值不随分期重复发放（仍为 ${num(tokenBeforeRelease.total)}）`,
+    num(parentToken2.total) === num(tokenBeforeRelease.total),
+    { before: num(tokenBeforeRelease.total), after: num(parentToken2.total) });
+
+  /* ---------- 7. 账务对账 ---------- */
+  console.log('\n[7] 账务对账');
+  const recon = await api<any>('/api/admin/settlements/reconcile', {
+    method: 'POST',
+    token: admin.token,
+    body: { date: settleDate },
+  });
+  for (const item of recon.checks as Array<{ name: string; ok: boolean }>) {
+    check(`对账：${item.name}`, item.ok);
+  }
+  check('对账覆盖 ≥6 项且全部成立',
+    recon.allPassed === true && (recon.checks as unknown[]).length >= 6, recon.checks);
+
+  /* ---------- 8. 收益口径 ---------- */
+  const summary = await api<any>('/api/me/bonus', { token: parentReg.token });
+  check('累计收益 = 钱包 + 太阳值',
+    num(summary.total) === num(parentWallet2.balance) + num(parentToken2.total),
+    { total: num(summary.total), wallet: num(parentWallet2.balance), token: num(parentToken2.total) });
+
+  /* ---------- 9. 权益通生命周期：耗尽 → 复消 ---------- */
+  console.log('\n[9] 权益通：未用完不可复消 → 钱包转出耗尽 → 复消恢复');
+  const repurchaseBlocked = await expectReject(
+    '/api/orders',
+    {
+      method: 'POST',
+      token: childReg.token,
+      idempotencyKey: key('smoke-repurchase-blocked'),
+      body: { type: 3, packageId: PACKAGE_ID, useBalance: true },
+    },
+    '权益通尚未用完',
+  );
+  check('权益通未用完时复消被拒绝', repurchaseBlocked === '', repurchaseBlocked);
+
+  await api('/api/me/realname', {
+    method: 'POST',
+    token: childReg.token,
+    body: { realName: '烟雾下线', idCard: '110101199001011237' },
+  });
+  await api(`/api/admin/members/${childReg.user.id}/realname/review`, {
+    method: 'POST',
+    token: admin.token,
+    body: { approved: true, remark: 'SMOKE 自动审核' },
+  });
+  await api('/api/me/transfer-password', {
+    method: 'POST',
+    token: childReg.token,
+    body: { newPassword: '654321' },
+  });
+
+  const quotaAmount = PV * 3;
+  await api(`/api/admin/wallets/${childReg.user.id}/adjust`, {
+    method: 'POST',
+    token: admin.token,
+    idempotencyKey: key('smoke-quota-wallet'),
+    body: { amount: quotaAmount, reason: 'SMOKE 充值用于消耗权益通' },
+  });
+  const transfer = await api<any>('/api/me/wallet/transfers', {
+    method: 'POST',
+    token: childReg.token,
+    idempotencyKey: key('smoke-wallet-transfer'),
+    body: { toPhone: parentPhone, amount: quotaAmount, paymentPassword: '654321', remark: 'SMOKE 耗尽权益通' },
+  });
+  check('钱包转账创建成功（额度已预占）', !!transfer.transferNo && transfer.status === 'PENDING', transfer);
+
+  if (transfer.riskFlag === 1) {
+    const list = await api<any>('/api/admin/transfers?page=1', { token: admin.token });
+    const target = rows(list).find((row) => row.transferNo === transfer.transferNo);
+    check('风控命中后转账出现在管理端待复核列表', !!target, transfer.transferNo);
+    await api(`/api/admin/transfers/${target?.id ?? 0}/review`, {
+      method: 'POST',
+      token: admin.token,
+      body: { action: 'APPROVE', platform: 'wallet' },
+    });
+  } else {
+    const list = await api<any>('/api/me/transfers/wallet?page=1', { token: parentReg.token });
+    const incoming = rows(list).find((row) => row.transferNo === transfer.transferNo);
+    check('待确认转账出现在接收方列表', !!incoming, transfer.transferNo);
+    await api(`/api/me/wallet/transfers/${incoming?.id ?? 0}/accept`, { method: 'POST', token: parentReg.token });
+  }
+
+  const childQuota2 = await api<any>('/api/me/transfer-quota', { token: childReg.token });
+  check(`权益通耗尽：已用 ${quotaAmount}、可用 0、需复消`,
+    num(childQuota2.used) === quotaAmount && num(childQuota2.available) === 0 && childQuota2.repurchaseRequired === true,
+    { used: num(childQuota2.used), available: num(childQuota2.available), required: childQuota2.repurchaseRequired });
+
+  const tokenBeforeRepurchase = await api<any>('/api/me/token', { token: parentReg.token });
+  await api(`/api/admin/wallets/${childReg.user.id}/adjust`, {
+    method: 'POST',
+    token: admin.token,
+    idempotencyKey: key('smoke-repurchase-wallet'),
+    body: { amount: PRICE, reason: 'SMOKE 充值复消' },
+  });
+  const repurchase = await api<any>('/api/orders', {
+    method: 'POST',
+    token: childReg.token,
+    idempotencyKey: key('smoke-repurchase'),
+    body: { type: 3, packageId: PACKAGE_ID, useBalance: true },
+  });
+  check('权益通耗尽后复消成功', repurchase.status === 1 && repurchase.type === 3, repurchase.status);
+
+  const childQuota3 = await api<any>('/api/me/transfer-quota', { token: childReg.token });
+  check(`复消后权益通再次发放 PV×3 = ${PV * 3}`,
+    num(childQuota3.granted) === PV * 6 && num(childQuota3.available) === PV * 3,
+    { granted: num(childQuota3.granted), available: num(childQuota3.available) });
+
+  const repurchaseTotal = Math.round(PV * repurchaseRewardRate);
+  const repurchaseCash = Math.round(repurchaseTotal * cashRatio);
+  const repurchaseToken = repurchaseTotal - repurchaseCash;
+  const parentToken3 = await api<any>('/api/me/token', { token: parentReg.token });
+  check(`复消直推奖同样先拆：太阳值 +${repurchaseToken}`,
+    num(parentToken3.total) - num(tokenBeforeRepurchase.total) === repurchaseToken,
+    { before: num(tokenBeforeRepurchase.total), after: num(parentToken3.total), expectAdd: repurchaseToken });
+
+  const plansAfter = await api<any[]>('/api/admin/bonus/plans', { token: admin.token });
+  const repurchasePlan = plansAfter.find((item) => item.order?.orderNo === repurchase.orderNo);
+  check(`复消直推计划：现金部分 ${repurchaseCash}（复消直推比例 ${repurchaseRewardRate}）`,
+    !!repurchasePlan && num(repurchasePlan.totalAmount) === repurchaseCash && repurchasePlan.splitAt !== null,
+    { total: num(repurchasePlan?.totalAmount), splitAt: repurchasePlan?.splitAt });
+
+  console.log(`\n=== 结果：${passed} 通过 / ${failed} 失败 ===`);
+  if (failed > 0) {
+    console.error(`失败项：\n- ${failures.join('\n- ')}`);
+    process.exitCode = 1;
+  }
+}
+
+main().catch((error) => {
+  console.error('\n烟雾测试中断：', error);
+  process.exitCode = 1;
 });

@@ -10,7 +10,7 @@
  *         2. 伞下人数（teamSize）逐层收敛：R = DEPTH，叶子 = 0
  *         3. 业绩沿链逐层归集：每层 totalPerformance 都等于订单金额
  *         4. 团队奖 / 平级奖 / 领导奖 / 直推奖在深层链上金额正确
- *         5. 5 项账务对账恒等式成立
+ *         5. 账务对账恒等式成立
  *
  * 用法：
  *   pnpm e2e:depth                 # 默认 300 层
@@ -18,19 +18,21 @@
  *   DEPTH=1001 pnpm e2e:depth       # 边界：第 1001 层应被上限拒绝（耗时较长）
  */
 import 'dotenv/config';
+import { randomUUID } from 'crypto';
 
 const BASE = process.env.API_BASE_URL ?? 'http://127.0.0.1:3000';
 const ADMIN_PHONE = process.env.E2E_ADMIN_PHONE ?? '13800138000';
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '123456';
 const DEPTH = Number(process.env.DEPTH ?? 300);
+const key = (scene: string): string => `${scene}-${randomUUID()}`;
 
 /** 上限与 relation.service.ts 的 MAX_TREE_DEPTH 保持一致 */
 const MAX_TREE_DEPTH = 1000;
-/** 至尊卡：价格 20000 */
+/** 至尊卡：价格与 PV 在运行期从接口读取，不写死 */
 const PACKAGE_ID = 4;
-const ORDER_AMOUNT = 20000;
-/** Lv1 种子门槛 5 万，脚本临时调到 1 万即可让全链晋升（全链仅 2 万业绩） */
-const TEMP_LV1_THRESHOLD = 10000;
+let ORDER_AMOUNT = 20000;
+let ORDER_PV = 20000;
+let TEMP_LV1_THRESHOLD = 10000;
 const SEED_LV1_THRESHOLD = 50000;
 
 let passed = 0;
@@ -51,13 +53,14 @@ function check(name: string, condition: boolean, detail?: unknown): void {
 
 async function api<T = any>(
   path: string,
-  options: { method?: string; body?: unknown; token?: string } = {},
+  options: { method?: string; body?: unknown; token?: string; idempotencyKey?: string } = {},
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: options.method ?? 'GET',
     headers: {
       'Content-Type': 'application/json',
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      ...(options.idempotencyKey ? { 'x-idempotency-key': options.idempotencyKey } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
     // 日结为大批量操作，放宽头部超时
@@ -109,6 +112,26 @@ async function main(): Promise<void> {
   });
   console.log(`[0] 管理员已登录（${ADMIN_PHONE}）`);
 
+  const packages = await api<any[]>('/api/admin/packages', { token: admin.token });
+  const pkg = packages.find((item) => item.id === PACKAGE_ID);
+  if (!pkg) throw new Error(`档位 ${PACKAGE_ID} 不存在，请先执行 prisma:seed`);
+  ORDER_AMOUNT = num(pkg.price);
+  ORDER_PV = num(pkg.pv);
+  // Lv1 门槛临时设为 PV 的一半：全链业绩都等于 PV，保证逐层晋升
+  TEMP_LV1_THRESHOLD = Math.max(1, Math.floor(ORDER_PV / 2));
+  const configs0 = await api<Array<{ key: string; value: unknown }>>('/api/admin/configs', { token: admin.token });
+  const cfg0 = new Map(configs0.map((row) => [row.key, Number(row.value)]));
+  const cashRatio0 = cfg0.get('bonus.cash_ratio') ?? 0.7;
+  const rewardRate0 = cfg0.get('bonus.reward_rate') ?? 1.0;
+  const periods0 = pkg.directReleaseDays ?? cfg0.get('bonus.direct_periods') ?? 20;
+  const directRate0 = pkg.directRewardRate === null || pkg.directRewardRate === undefined
+    ? rewardRate0 : Number(pkg.directRewardRate);
+  const directRateCache = directRate0;
+  const cashRatioCache = cashRatio0;
+  const directCashTotal = Math.round(Math.round(ORDER_PV * directRate0) * cashRatio0);
+  const directFirstStage = Math.floor(directCashTotal / Number(periods0));
+  console.log(`[0] 档位 ${pkg.name}：价格 ${ORDER_AMOUNT}，PV ${ORDER_PV}，直推现金 ${directCashTotal} / ${periods0} 期，首期 ${directFirstStage}`);
+
   /* ---------- 1. 注册直链 R → L1 → … → L{DEPTH} ---------- */
   const targetDepth = Math.min(DEPTH, MAX_TREE_DEPTH);
   console.log(`\n[1] 注册 ${targetDepth + 1} 个账号的推荐直链`);
@@ -122,7 +145,7 @@ async function main(): Promise<void> {
       const phone = `159${runId}${String(seq).padStart(4, '0')}`;
       const result = await apiAllowFail<{ token: string; user: { id: string } }>('/api/auth/register', {
         method: 'POST',
-        body: { phone, password: '123456', nickname: `DEPTH-${tag}`, inviteCode: inviteCode ?? undefined },
+        body: { phone, password: 'Depth2026', nickname: `DEPTH-${tag}`, inviteCode: inviteCode ?? undefined },
       });
       if (result.code === 0) {
         seq += 1;
@@ -182,7 +205,7 @@ async function main(): Promise<void> {
       method: 'POST',
       body: {
         phone: `159${runId}${String(seq).padStart(4, '0')}`,
-        password: '123456',
+        password: 'Depth2026',
         nickname: 'DEPTH-overflow',
         inviteCode: parent.inviteCode,
       },
@@ -233,16 +256,19 @@ async function main(): Promise<void> {
     await api(`/api/admin/wallets/${deepest.userId}/adjust`, {
       method: 'POST',
       token: admin.token,
+      idempotencyKey: key('depth-wallet'),
       body: { amount: ORDER_AMOUNT, reason: `深层 E2E 充值 L${deepest.depth} 购卡钱包` },
     });
     const order = await api<any>('/api/orders', {
       method: 'POST',
       token: deepest.token,
+      idempotencyKey: key('depth-order'),
       body: { type: 1, packageId: PACKAGE_ID, useBalance: true },
     });
     await api(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
       method: 'POST',
       token: admin.token,
+      body: { trackingNo: `DP${runId}${String(deepest.depth)}`, shippingCarrier: '顺丰速运' },
     });
     await api(`/api/orders/${encodeURIComponent(order.orderNo)}/confirm`, {
       method: 'POST',
@@ -261,13 +287,13 @@ async function main(): Promise<void> {
     let aggBad: unknown = null;
     for (const account of chain) {
       const rank = await api<any>('/api/me/rank', { token: account.token });
-      if (num(rank.totalPerformance) !== ORDER_AMOUNT || rank.rankLevel !== 1) {
+      if (num(rank.totalPerformance) !== ORDER_PV || rank.rankLevel !== 1) {
         aggOk = false;
         aggBad = { tag: account.tag, total: num(rank.totalPerformance), level: rank.rankLevel };
         break;
       }
     }
-    check(`全部 ${chain.length} 层 totalPerformance = ${ORDER_AMOUNT} 且晋升 Lv1`, aggOk, aggBad);
+    check(`全部 ${chain.length} 层 totalPerformance = ${ORDER_PV} 且晋升 Lv1`, aggOk, aggBad);
 
     /* ---------- 7. 深层链上的团队奖 / 平级奖 / 领导奖 ---------- */
     console.log('\n[7] 团队奖 / 平级奖 / 领导奖（深层链）');
@@ -276,7 +302,7 @@ async function main(): Promise<void> {
     const peerRate = cfg.get('bonus.peer_rate') ?? 1.0;
     const leaderRate = cfg.get('bonus.leader_rate') ?? 0.5;
     const teamRate = num(lv1?.teamRate ?? 0.03);
-    const teamBonus = Math.round(ORDER_AMOUNT * teamRate);
+    const teamBonus = Math.round(ORDER_PV * teamRate);
     console.log(`  teamRate=${teamRate} peerRate=${peerRate} leaderRate=${leaderRate} 团队奖=${teamBonus}`);
 
     const bonusOf = async (tag: string, type: number): Promise<number> => {
@@ -285,7 +311,7 @@ async function main(): Promise<void> {
       return sum(r.list ?? []);
     };
 
-    // 每个节点（含叶子）团队奖相同：teamAmount 都是 20000
+    // 每个节点（含叶子）团队奖相同：teamAmount 都是订单 PV
     for (const tag of ['R', 'L1', `L${Math.floor(targetDepth / 2)}`, `L${targetDepth}`]) {
       const actual = await bonusOf(tag, 2);
       check(`${tag} 团队奖 = ${teamBonus}`, actual === teamBonus, actual);
@@ -305,11 +331,25 @@ async function main(): Promise<void> {
     check(`L1 平级奖 = ${Math.round(teamBonus * peerRate)}`, l1Peer === Math.round(teamBonus * peerRate), l1Peer);
 
     /* ---------- 8. 次日日结：直推奖分期释放 ---------- */
-    console.log(`\n[8] 直推奖分期释放（${day2}，第 1 期 = ${ORDER_AMOUNT} ÷ 20）`);
+    console.log(`\n[8] 直推奖分期释放（${day2}，第 1 期 = 现金部分 ÷ ${periods0}）`);
     const s2 = await settle(day2);
     check('次日日结跑满 11 步', s2.step === 11, s2);
-    const direct = await bonusOf(parentOfDeepest.tag, 1);
-    check(`${parentOfDeepest.tag} 直推奖第 1 期 = ${ORDER_AMOUNT / 20}`, direct === ORDER_AMOUNT / 20, direct);
+    // 直推奖「先拆后分期」：type=1 既有支付即到账的太阳值记录（stageId 为空），
+    // 也有分期释放的现金记录（stageId 非空）。首期只统计释放记录。
+    const directRecords = await api<any>(
+      `/api/me/bonus/records?type=1&page=1`,
+      { token: parentOfDeepest.token },
+    );
+    const directStages = (directRecords.list ?? []).filter((row: any) => row.stageId !== null);
+    const directStageSum = directStages.reduce((total: number, row: any) => total + num(row.amount), 0);
+    const directToken = (directRecords.list ?? [])
+      .filter((row: any) => row.stageId === null)
+      .reduce((total: number, row: any) => total + num(row.amount), 0);
+    check(`${parentOfDeepest.tag} 直推奖第 1 期现金 = ${directFirstStage}`,
+      directStageSum === directFirstStage, directStageSum);
+    check(`${parentOfDeepest.tag} 太阳值部分支付即到账且不随分期重复发放`,
+      directToken === Math.round(ORDER_PV * directRateCache) - directCashTotal,
+      { token: directToken });
 
     /* ---------- 9. 对账 ---------- */
     console.log('\n[9] 账务对账');
@@ -321,7 +361,7 @@ async function main(): Promise<void> {
     for (const item of recon.checks as Array<{ name: string; ok: boolean }>) {
       check(`对账：${item.name}`, item.ok);
     }
-    check('5 项对账恒等式全部成立', recon.allPassed === true, recon.checks);
+    check('账务对账全部成立', recon.allPassed === true, recon.checks);
 
     console.log(`\n=== 结果：通过 ${passed} 项，失败 ${failed} 项 ===`);
   } finally {

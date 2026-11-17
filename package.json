@@ -22,6 +22,7 @@
     "test": "pnpm -r test",
     "smoke": "pnpm --filter @solar/api test:smoke",
     "e2e": "pnpm --filter @solar/api test:e2e",
+    "e2e:direct": "pnpm --filter @solar/api test:direct",
     "e2e:depth": "pnpm --filter @solar/api test:e2e:depth"
   },
   "devDependencies": {
