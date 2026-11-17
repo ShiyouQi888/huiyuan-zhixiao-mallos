@@ -157,22 +157,49 @@ export class AdminExtendedController {
     });
   }
 
+  /** 商品 PV 不允许为 0：PV=0 的商品下单后不产生业绩，也无法计算复消直推奖 */
+  private requireProductPv(value: unknown): number {
+    const pv = Number(value);
+    if (!Number.isSafeInteger(pv) || pv < 1) {
+      throw new BusinessException(1001, '商品PV须为大于 0 的整数（PV 为 0 的商品不产生业绩，不允许保存）');
+    }
+    return pv;
+  }
+
   @Post('products')
   @Roles('SUPER_ADMIN', 'OPERATOR')
-  createProduct(@Body() body: { name: string; description?: string; price: number; stock?: number }) {
+  createProduct(@Body() body: { name: string; description?: string; price: number; pv?: number; stock?: number; status?: number }) {
     return this.prisma.product.create({
-      data: { name: body.name, description: body.description, price: BigInt(body.price), stock: body.stock ?? 0 },
+      data: {
+        name: body.name,
+        description: body.description,
+        price: BigInt(body.price),
+        pv: BigInt(this.requireProductPv(body.pv ?? body.price)),
+        stock: body.stock ?? 0,
+        ...(body.status !== undefined ? { status: Number(body.status) } : {}),
+      },
     });
   }
 
   @Put('products/:id')
   @Roles('SUPER_ADMIN', 'OPERATOR')
-  updateProduct(@Param('id') id: string, @Body() body: Partial<{ name: string; price: number; stock: number; status: number }>) {
+  async updateProduct(
+    @Param('id') id: string,
+    @Body() body: Partial<{ name: string; price: number; pv: number; stock: number; status: number }>,
+  ) {
+    // 上架前兜底：历史 PV=0 的商品不允许重新上架
+    if (body.status === 1 && body.pv === undefined) {
+      const existing = await this.prisma.product.findUnique({ where: { id: BigInt(id) }, select: { pv: true, name: true } });
+      if (existing && existing.pv <= 0n) {
+        throw new BusinessException(1001, `商品「${existing.name}」PV 为 0，不能上架；请先配置大于 0 的 PV`);
+      }
+    }
     return this.prisma.product.update({
       where: { id: BigInt(id) },
       data: {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.price !== undefined ? { price: BigInt(body.price) } : {}),
+        ...(body.pv !== undefined ? { pv: BigInt(this.requireProductPv(body.pv)) } : {}),
         ...(body.stock !== undefined ? { stock: body.stock } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
       },

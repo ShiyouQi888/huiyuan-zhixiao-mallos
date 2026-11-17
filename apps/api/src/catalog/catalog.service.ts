@@ -26,9 +26,14 @@ export interface ProductInput {
 export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * 商品 PV 校验：**不允许为 0**。
+   * 「消费即累计」是硬规则，PV=0 的商品下单后不产生任何业绩、不参与等级晋升，
+   * 也无法据此计算复消直推奖，因此必须在保存阶段就拦截。
+   */
   private validatePv(value: number): number {
-    if (!Number.isSafeInteger(value) || value < 0) {
-      throw new BusinessException(1001, '商品PV须为大于或等于 0 的整数');
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new BusinessException(1001, '商品PV须为大于 0 的整数（PV 为 0 的商品不产生业绩，不允许保存）');
     }
     return value;
   }
@@ -145,7 +150,11 @@ export class CatalogService {
   }
 
   async updateProduct(id: bigint, data: Partial<ProductInput>) {
-    await this.productDetail(id);
+    const existing = await this.productDetail(id);
+    // 上架前兜底：历史 PV=0 的商品不允许重新上架（否则下单后不产生业绩）
+    if (data.status === 1 && data.pv === undefined && existing.pv <= 0n) {
+      throw new BusinessException(1001, `商品「${existing.name}」PV 为 0，不能上架；请先配置大于 0 的 PV`);
+    }
     return this.prisma.$transaction(async (tx) => {
       await tx.product.update({
         where: { id },
@@ -208,6 +217,16 @@ export class CatalogService {
 
   /** 批量上下架 */
   async batchStatus(ids: bigint[], status: number) {
+    // 上架前兜底：PV=0 的商品不允许上架
+    if (status === 1) {
+      const invalid = await this.prisma.product.findFirst({
+        where: { id: { in: ids }, pv: { lte: 0n } },
+        select: { name: true },
+      });
+      if (invalid) {
+        throw new BusinessException(1001, `商品「${invalid.name}」PV 为 0，不能上架；请先配置大于 0 的 PV`);
+      }
+    }
     return this.prisma.product.updateMany({
       where: { id: { in: ids } },
       data: { status },

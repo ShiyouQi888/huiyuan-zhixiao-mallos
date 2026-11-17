@@ -89,6 +89,11 @@ export function Catalog() {
 
   const save = async () => {
     if (!editing) return;
+    // 商品 PV 不允许为 0：PV=0 的商品下单后不产生业绩，也无法据此计算复消直推奖
+    if (!Number.isInteger(Number(editing.pv)) || Number(editing.pv) < 1) {
+      notify('单件 PV 须为大于 0 的整数', 'error');
+      return;
+    }
     const agreed = await confirm({
       title: editing.id ? `确认保存商品「${editing.name}」？` : `确认创建商品「${editing.name}」？`,
       description: `售价 ¥${Number(editing.price).toLocaleString('zh-CN')}，单件 PV ${Number(editing.pv).toLocaleString('zh-CN')}，库存 ${Number(editing.stock).toLocaleString('zh-CN')}，当前状态为${Number(editing.status) === 1 ? '上架' : '下架'}。保存会影响商城展示和新订单计酬。`,
@@ -408,8 +413,8 @@ export function Catalog() {
                 <Field label="售价（元）" required>
                   <input className="input" type="number" min={0} step={1} value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value, ...(editing.pvFollowsPrice ? { pv: e.target.value } : {}) })} />
                 </Field>
-                <Field label="单件 PV" required hint="默认跟随售价，可单独调整；1 PV = ¥1 奖金基数，会员商品订单按订单PV × 3发放权益通">
-                  <input className="input" type="number" min={0} step={1} value={editing.pv} onChange={(e) => setEditing({ ...editing, pv: e.target.value, pvFollowsPrice: false })} />
+                <Field label="单件 PV" required hint="默认跟随售价，可单独调整；不可为 0（PV 为 0 的商品下单不产生业绩）。1 PV = ¥1 奖金基数，会员商品复消按订单PV × 3 发放权益通，并按 10% 发放直推奖">
+                  <input className="input" type="number" min={1} step={1} value={editing.pv} onChange={(e) => setEditing({ ...editing, pv: e.target.value, pvFollowsPrice: false })} />
                 </Field>
                 <Field label="划线价">
                   <input className="input" type="number" value={editing.originalPrice} onChange={(e) => setEditing({ ...editing, originalPrice: e.target.value })} />

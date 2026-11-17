@@ -69,6 +69,8 @@ export class OrderService implements OnModuleInit {
     });
 
     if (order.type === 4) {
+      // 普通商品：已购卡会员的商品消费视为「复消」——发权益通 + 按复消比例发直推奖；
+      // 未购卡会员的商品消费只累计 PV（与 type=3 复消的前置条件保持一致）。
       if (order.isRepurchase && order.pvAmount > 0n) {
         await this.transferQuota.grant(
           order.userId,
@@ -77,6 +79,13 @@ export class OrderService implements OnModuleInit {
           order.orderNo,
           '会员普通商品订单支付成功，按订单PV的3倍发放权益通',
           tx,
+        );
+        await this.createDirectPlan(
+          tx,
+          order,
+          paidAt,
+          Number(await this.config.getNumber('bonus.repurchase_rate', 0.1)),
+          Number(await this.config.getNumber('bonus.direct_periods', 20)),
         );
       }
       await tx.order.update({ where: { id: order.id }, data: { businessEffectsAppliedAt: new Date() } });
@@ -110,61 +119,74 @@ export class OrderService implements OnModuleInit {
       );
     }
 
-    const rewardRecipient = order.parentIdSnapshot
-      ? await tx.user.findUnique({ where: { id: order.parentIdSnapshot }, select: { status: true } })
-      : null;
-    if (order.parentIdSnapshot && rewardRecipient?.status === 0 && !(await tx.bonusPlan.findUnique({ where: { orderId: order.id } }))) {
-      const rate = order.type === 3
-        ? Number(pkg.repurchaseRewardRate ?? await this.config.getNumber('bonus.repurchase_rate', 0.1))
-        : Number(pkg.directRewardRate ?? await this.config.getNumber('bonus.reward_rate', 1.0));
-      const total = BigInt(Math.round(Number(order.pvAmount) * rate));
-      const periods = Number(pkg.directReleaseDays ?? await this.config.getNumber('bonus.direct_periods', 20));
-      if (total > 0n) {
-        // 直推奖分配：**先拆，后分期**。
-        // 1) 先按 bonus.cash_ratio 拆出现金部分（分期释放）与太阳值部分（一次性入账）；
-        // 2) 现金部分再均分到各期，余数补最后一期，保证 Σ各期 === 现金部分。
-        const cashRatio = await this.config.getNumber('bonus.cash_ratio', 0.7);
-        const { cashTotal, tokenTotal } = splitDirectBonus(total, cashRatio);
-        const stageAmounts = allocateDirectStages(cashTotal, periods);
-        const startAt = new Date(paidAt);
-        startAt.setUTCHours(0, 0, 0, 0);
-        startAt.setUTCDate(startAt.getUTCDate() + 1);
-        const plan = await tx.bonusPlan.create({
-          data: {
-            orderId: order.id,
-            beneficiaryId: order.parentIdSnapshot,
-            // 计划总额只统计「参与分期释放的现金部分」，太阳值不占用分期额度
-            totalAmount: cashTotal,
-            dailyAmount: cashTotal / BigInt(periods),
-            periods,
-            status: 'PENDING',
-            startAt,
-            splitAt: new Date(),
-          },
-        });
-        if (tokenTotal > 0n) {
-          // 太阳值部分支付成功即到账（不参与分期），按 planId 幂等
-          await this.bonus.creditDirectTokenPortion(
-            {
-              userId: order.parentIdSnapshot,
-              amount: tokenTotal,
-              settleDate: paidAt,
-              sourceOrderId: order.id,
-              planId: plan.id,
-            },
-            tx,
-          );
-        }
-        for (let i = 1; i <= periods; i++) {
-          const dueAt = new Date(startAt);
-          dueAt.setUTCDate(dueAt.getUTCDate() + i - 1);
-          await tx.bonusStage.create({
-            data: { planId: plan.id, periodNo: i, amount: stageAmounts[i - 1], dueAt, status: 'PENDING' },
-          });
-        }
-      }
-    }
+    const rate = order.type === 3
+      ? Number(pkg.repurchaseRewardRate ?? await this.config.getNumber('bonus.repurchase_rate', 0.1))
+      : Number(pkg.directRewardRate ?? await this.config.getNumber('bonus.reward_rate', 1.0));
+    const periods = Number(pkg.directReleaseDays ?? await this.config.getNumber('bonus.direct_periods', 20));
+    await this.createDirectPlan(tx, order, paidAt, rate, periods);
     await tx.order.update({ where: { id: order.id }, data: { businessEffectsAppliedAt: new Date() } });
+  }
+
+  /**
+   * 创建直推奖计划：**先拆，后分期**。
+   * 1) 先按 bonus.cash_ratio 把奖金总额拆成现金（分期释放）与太阳值（一次性入账）；
+   * 2) 现金部分再均分到各期，余数补最后一期，保证 Σ各期 === 现金部分。
+   * 幂等：同一订单只建一个计划（orderId 唯一），已有计划或推荐人不可用时直接跳过。
+   */
+  private async createDirectPlan(
+    tx: Prisma.TransactionClient,
+    order: PrismaOrder,
+    paidAt: Date,
+    rate: number,
+    periods: number,
+  ) {
+    if (!order.parentIdSnapshot) return;
+    const total = BigInt(Math.round(Number(order.pvAmount) * rate));
+    if (total <= 0n) return;
+    if (await tx.bonusPlan.findUnique({ where: { orderId: order.id } })) return;
+    const recipient = await tx.user.findUnique({ where: { id: order.parentIdSnapshot }, select: { status: true } });
+    if (recipient?.status !== 0) return;
+
+    const safePeriods = Number.isSafeInteger(periods) && periods > 0 ? periods : 20;
+    const cashRatio = await this.config.getNumber('bonus.cash_ratio', 0.7);
+    const { cashTotal, tokenTotal } = splitDirectBonus(total, cashRatio);
+    const stageAmounts = allocateDirectStages(cashTotal, safePeriods);
+    const startAt = new Date(paidAt);
+    startAt.setUTCHours(0, 0, 0, 0);
+    startAt.setUTCDate(startAt.getUTCDate() + 1);
+    const plan = await tx.bonusPlan.create({
+      data: {
+        orderId: order.id,
+        beneficiaryId: order.parentIdSnapshot,
+        // 计划总额只统计「参与分期释放的现金部分」，太阳值不占用分期额度
+        totalAmount: cashTotal,
+        dailyAmount: cashTotal / BigInt(safePeriods),
+        periods: safePeriods,
+        status: 'PENDING',
+        startAt,
+        splitAt: new Date(),
+      },
+    });
+    if (tokenTotal > 0n) {
+      // 太阳值部分支付成功即到账（不参与分期），按 planId 幂等
+      await this.bonus.creditDirectTokenPortion(
+        {
+          userId: order.parentIdSnapshot,
+          amount: tokenTotal,
+          settleDate: paidAt,
+          sourceOrderId: order.id,
+          planId: plan.id,
+        },
+        tx,
+      );
+    }
+    for (let i = 1; i <= safePeriods; i++) {
+      const dueAt = new Date(startAt);
+      dueAt.setUTCDate(dueAt.getUTCDate() + i - 1);
+      await tx.bonusStage.create({
+        data: { planId: plan.id, periodNo: i, amount: stageAmounts[i - 1], dueAt, status: 'PENDING' },
+      });
+    }
   }
 
   /** 订单由钱包余额支付；权益通仅用于约束会员间钱包转出。 */

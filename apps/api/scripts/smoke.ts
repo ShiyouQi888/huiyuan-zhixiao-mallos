@@ -3,7 +3,7 @@
  *
  * 链路：登录 → 档位/开关 → 注册两级 → 下单（幂等键/余额校验）→ 支付即生效
  *      → 交付（快递单号）→ 确认收货 → 日结 → 直推奖「先拆后分期」释放
- *      → 对账 6 项 → 权益通耗尽 → 复消
+ *      → 对账 7 项 → 权益通耗尽 → 复消 → 普通商品复消（PV 累计 + 权益通 + 10% 直推奖）
  *
  * 用法：先启动 API，再执行 pnpm --filter @solar/api test:smoke
  * 说明：可重复执行（每次注册独立手机号）；日结会对当日全库数据重算，但不改历史已发奖金。
@@ -383,6 +383,90 @@ async function main(): Promise<void> {
   check(`复消直推计划：现金部分 ${repurchaseCash}（复消直推比例 ${repurchaseRewardRate}）`,
     !!repurchasePlan && num(repurchasePlan.totalAmount) === repurchaseCash && repurchasePlan.splitAt !== null,
     { total: num(repurchasePlan?.totalAmount), splitAt: repurchasePlan?.splitAt });
+
+  /* ---------- 10. 普通商品复消：PV 累计 + 权益通 + 10% 直推奖 ---------- */
+  console.log('\n[10] 普通商品订单（复消）：PV 累计 + 权益通 PV×3 + 10% 直推奖');
+
+  const zeroPvCreate = await expectReject(
+    '/api/admin/catalog/products',
+    {
+      method: 'POST',
+      token: admin.token,
+      body: { name: `SMOKE 零PV商品 ${runId}`, price: 199, pv: 0, stock: 1, status: 0 },
+    },
+    '商品PV须为大于 0',
+  );
+  check('商品 PV=0 创建被拒绝', zeroPvCreate === '', zeroPvCreate);
+
+  const productsForOrder = rows<any>(await api('/api/admin/catalog/products?status=1&page=1', { token: admin.token }));
+  const product = productsForOrder.find((item) => {
+    const binds = rows<any>(item.packageBinds);
+    return num(item.status) === 1 && num(item.pv) > 0 && num(item.stock) >= 1
+      && (binds.length === 0 || binds.some((bind) => Number(bind.packageId) === PACKAGE_ID));
+  });
+  if (!product) throw new Error('没有可用的上架商品（PV>0 且库存≥1），请先执行 pnpm --filter @solar/api prisma:seed');
+
+  const zeroPvUpdate = await expectReject(
+    `/api/admin/catalog/products/${product.id}`,
+    { method: 'PUT', token: admin.token, body: { pv: 0 } },
+    '商品PV须为大于 0',
+  );
+  check('商品 PV 改成 0 被拒绝', zeroPvUpdate === '', zeroPvUpdate);
+
+  const productPv = num(product.pv);
+  const productBind = rows<any>(product.packageBinds).find((bind) => Number(bind.packageId) === PACKAGE_ID);
+  const unitPrice = productBind?.exclusivePrice === null || productBind?.exclusivePrice === undefined
+    ? num(product.price) : num(productBind.exclusivePrice);
+
+  const address = await api<any>('/api/me/addresses', {
+    method: 'POST',
+    token: childReg.token,
+    body: { receiver: '烟雾收货人', phone: childPhone, province: '广东省', city: '深圳市', district: '南山区', detail: '科技园 1 号', isDefault: true },
+  });
+  await api(`/api/admin/wallets/${childReg.user.id}/adjust`, {
+    method: 'POST',
+    token: admin.token,
+    idempotencyKey: key('smoke-product-wallet'),
+    body: { amount: unitPrice, reason: 'SMOKE 充值购买普通商品' },
+  });
+
+  const quotaBeforeProduct = await api<any>('/api/me/transfer-quota', { token: childReg.token });
+  const tokenBeforeProduct = await api<any>('/api/me/token', { token: parentReg.token });
+  const productOrder = await api<any>('/api/orders', {
+    method: 'POST',
+    token: childReg.token,
+    idempotencyKey: key('smoke-product-order'),
+    body: { type: 4, productId: String(product.id), quantity: 1, addressId: String(address.id), useBalance: true },
+  });
+  check(`商品订单支付成功并累计 PV ${productPv}`,
+    productOrder.type === 4 && num(productOrder.pvAmount) === productPv && num(productOrder.amount) === unitPrice,
+    { type: productOrder.type, pvAmount: num(productOrder.pvAmount), amount: num(productOrder.amount) });
+  check('已购卡会员的商品订单标记为复消', productOrder.isRepurchase === true, productOrder.isRepurchase);
+
+  const productDetailOrder = await api<any>(`/api/orders/${productOrder.orderNo}`, { token: childReg.token });
+  check(`商品订单业绩已落库（OrderPerformance = ${productPv}）`,
+    num(productDetailOrder.performance?.amount) === productPv,
+    { performance: productDetailOrder.performance?.amount });
+
+  const quotaAfterProduct = await api<any>('/api/me/transfer-quota', { token: childReg.token });
+  check(`商品复消发放权益通 PV×3 = ${productPv * 3}`,
+    num(quotaAfterProduct.granted) - num(quotaBeforeProduct.granted) === productPv * 3,
+    { before: num(quotaBeforeProduct.granted), after: num(quotaAfterProduct.granted) });
+
+  const productBonusTotal = Math.round(productPv * repurchaseRewardRate);
+  const productBonusCash = Math.round(productBonusTotal * cashRatio);
+  const productBonusToken = productBonusTotal - productBonusCash;
+  const tokenAfterProduct = await api<any>('/api/me/token', { token: parentReg.token });
+  check(`商品复消直推奖先拆：太阳值 +${productBonusToken}（总额 ${productBonusTotal} 的 30% 部分）`,
+    num(tokenAfterProduct.total) - num(tokenBeforeProduct.total) === productBonusToken,
+    { before: num(tokenBeforeProduct.total), after: num(tokenAfterProduct.total), expectAdd: productBonusToken });
+
+  const productPlan = rows<any>(await api('/api/admin/bonus/plans', { token: admin.token }))
+    .find((item) => item.order?.orderNo === productOrder.orderNo);
+  check(`商品复消直推计划：现金部分 ${productBonusCash}（比例 ${repurchaseRewardRate}）+ 分期 ${defaultPeriods} 期`,
+    !!productPlan && num(productPlan.totalAmount) === productBonusCash
+      && productPlan.splitAt !== null && Number(productPlan.periods) === defaultPeriods,
+    { total: num(productPlan?.totalAmount), periods: productPlan?.periods, splitAt: productPlan?.splitAt });
 
   console.log(`\n=== 结果：${passed} 通过 / ${failed} 失败 ===`);
   if (failed > 0) {
