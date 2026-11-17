@@ -413,6 +413,24 @@ async function main(): Promise<void> {
   );
   check('商品 PV 改成 0 被拒绝', zeroPvUpdate === '', zeroPvUpdate);
 
+  const pvAbovePriceCreate = await expectReject(
+    '/api/admin/catalog/products',
+    {
+      method: 'POST',
+      token: admin.token,
+      body: { name: `SMOKE 超额PV商品 ${runId}`, price: 199, pv: 200, stock: 1, status: 0 },
+    },
+    '不得超过售价',
+  );
+  check('商品 PV 高于售价时创建被拒绝', pvAbovePriceCreate === '', pvAbovePriceCreate);
+
+  const pvAbovePriceUpdate = await expectReject(
+    `/api/admin/catalog/products/${product.id}`,
+    { method: 'PUT', token: admin.token, body: { pv: num(product.price) + 1 } },
+    '不得超过售价',
+  );
+  check('商品 PV 调到高于售价被拒绝', pvAbovePriceUpdate === '', pvAbovePriceUpdate);
+
   const productPv = num(product.pv);
   const productBind = rows<any>(product.packageBinds).find((bind) => Number(bind.packageId) === PACKAGE_ID);
   const unitPrice = productBind?.exclusivePrice === null || productBind?.exclusivePrice === undefined

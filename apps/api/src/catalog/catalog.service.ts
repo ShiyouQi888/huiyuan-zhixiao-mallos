@@ -27,15 +27,27 @@ export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 商品 PV 校验：**不允许为 0**。
+   * 商品 PV 校验（一）：**不允许为 0**。
    * 「消费即累计」是硬规则，PV=0 的商品下单后不产生任何业绩、不参与等级晋升，
    * 也无法据此计算复消直推奖，因此必须在保存阶段就拦截。
    */
-  private validatePv(value: number): number {
+  private normalizePv(value: number): number {
     if (!Number.isSafeInteger(value) || value < 1) {
       throw new BusinessException(1001, '商品PV须为大于 0 的整数（PV 为 0 的商品不产生业绩，不允许保存）');
     }
     return value;
+  }
+
+  /**
+   * 商品 PV 校验（二）：**PV 不得超过售价**。
+   * 权益通按订单 PV×3 发放，用作会员间钱包转账的额度上限。若 PV 高于售价，
+   * 就能用较低金额换取超额转账额度（例如售价 100 / PV 10000 → 换 30000 额度），
+   * 属于参数配反导致的套利口子。正常 1:1 或 PV 低于售价的商品不受影响。
+   */
+  private assertPvNotAbovePrice(pv: number, price: number): void {
+    if (Number.isFinite(price) && pv > price) {
+      throw new BusinessException(1001, `商品PV（${pv}）不得超过售价（${price}），否则可用低售价换取超额权益通额度`);
+    }
   }
 
   /* ---------- 分类 ---------- */
@@ -121,6 +133,9 @@ export class CatalogService {
   }
 
   async createProduct(data: ProductInput) {
+    const price = data.price;
+    const pv = this.normalizePv(data.pv ?? price);
+    this.assertPvNotAbovePrice(pv, price);
     return this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
@@ -130,8 +145,8 @@ export class CatalogService {
           categoryId: data.categoryId ?? null,
           images: (data.images ?? []) as never,
           details: (data.details ?? []) as never,
-          price: BigInt(data.price),
-          pv: BigInt(this.validatePv(data.pv ?? data.price)),
+          price: BigInt(price),
+          pv: BigInt(pv),
           originalPrice: BigInt(data.originalPrice ?? 0),
           stock: data.stock ?? 0,
           status: data.status ?? 0,
@@ -155,6 +170,10 @@ export class CatalogService {
     if (data.status === 1 && data.pv === undefined && existing.pv <= 0n) {
       throw new BusinessException(1001, `商品「${existing.name}」PV 为 0，不能上架；请先配置大于 0 的 PV`);
     }
+    // PV 与售价必须成对校验：只改其中一个时，另一侧取现值参与比较
+    const nextPrice = data.price !== undefined ? Number(data.price) : Number(existing.price);
+    const nextPv = data.pv !== undefined ? this.normalizePv(Number(data.pv)) : Number(existing.pv);
+    this.assertPvNotAbovePrice(nextPv, nextPrice);
     return this.prisma.$transaction(async (tx) => {
       await tx.product.update({
         where: { id },
@@ -166,7 +185,7 @@ export class CatalogService {
           ...(data.images !== undefined ? { images: data.images as never } : {}),
           ...(data.details !== undefined ? { details: data.details as never } : {}),
           ...(data.price !== undefined ? { price: BigInt(data.price) } : {}),
-          ...(data.pv !== undefined ? { pv: BigInt(this.validatePv(data.pv)) } : {}),
+          ...(data.pv !== undefined ? { pv: BigInt(nextPv) } : {}),
           ...(data.originalPrice !== undefined ? { originalPrice: BigInt(data.originalPrice) } : {}),
           ...(data.stock !== undefined ? { stock: data.stock } : {}),
           ...(data.status !== undefined ? { status: data.status } : {}),

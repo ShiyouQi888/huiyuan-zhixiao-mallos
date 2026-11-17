@@ -155,11 +155,17 @@ export class AdminExtendedController {
     });
   }
 
-  /** 商品 PV 不允许为 0：PV=0 的商品下单后不产生业绩，也无法计算复消直推奖 */
-  private requireProductPv(value: unknown): number {
+  /**
+   * 商品 PV 校验：不允许为 0（PV=0 不产生业绩，也无法计算复消直推奖），
+   * 且不得超过售价（权益通按 PV×3 发放，PV 高于售价等于用低售价换超额转账额度）。
+   */
+  private requireProductPv(value: unknown, price: number): number {
     const pv = Number(value);
     if (!Number.isSafeInteger(pv) || pv < 1) {
       throw new BusinessException(1001, '商品PV须为大于 0 的整数（PV 为 0 的商品不产生业绩，不允许保存）');
+    }
+    if (Number.isFinite(price) && pv > price) {
+      throw new BusinessException(1001, `商品PV（${pv}）不得超过售价（${price}），否则可用低售价换取超额权益通额度`);
     }
     return pv;
   }
@@ -172,7 +178,7 @@ export class AdminExtendedController {
         name: body.name,
         description: body.description,
         price: BigInt(body.price),
-        pv: BigInt(this.requireProductPv(body.pv ?? body.price)),
+        pv: BigInt(this.requireProductPv(body.pv ?? body.price, body.price)),
         stock: body.stock ?? 0,
         ...(body.status !== undefined ? { status: Number(body.status) } : {}),
       },
@@ -185,19 +191,25 @@ export class AdminExtendedController {
     @Param('id') id: string,
     @Body() body: Partial<{ name: string; price: number; pv: number; stock: number; status: number }>,
   ) {
+    const existing = await this.prisma.product.findUnique({
+      where: { id: BigInt(id) },
+      select: { pv: true, price: true, name: true },
+    });
+    if (!existing) throw new BusinessException(4003, '商品不存在');
     // 上架前兜底：历史 PV=0 的商品不允许重新上架
-    if (body.status === 1 && body.pv === undefined) {
-      const existing = await this.prisma.product.findUnique({ where: { id: BigInt(id) }, select: { pv: true, name: true } });
-      if (existing && existing.pv <= 0n) {
-        throw new BusinessException(1001, `商品「${existing.name}」PV 为 0，不能上架；请先配置大于 0 的 PV`);
-      }
+    if (body.status === 1 && body.pv === undefined && existing.pv <= 0n) {
+      throw new BusinessException(1001, `商品「${existing.name}」PV 为 0，不能上架；请先配置大于 0 的 PV`);
     }
+    // PV 与售价成对校验：只改其中一个时，另一侧取现值参与比较
+    const nextPrice = body.price !== undefined ? body.price : Number(existing.price);
+    const nextPv = body.pv !== undefined ? Number(body.pv) : Number(existing.pv);
+    this.requireProductPv(nextPv, nextPrice);
     return this.prisma.product.update({
       where: { id: BigInt(id) },
       data: {
         ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.price !== undefined ? { price: BigInt(body.price) } : {}),
-        ...(body.pv !== undefined ? { pv: BigInt(this.requireProductPv(body.pv)) } : {}),
+        ...(body.price !== undefined ? { price: BigInt(nextPrice) } : {}),
+        ...(body.pv !== undefined ? { pv: BigInt(nextPv) } : {}),
         ...(body.stock !== undefined ? { stock: body.stock } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
       },
