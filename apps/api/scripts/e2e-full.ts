@@ -125,6 +125,17 @@ interface Account {
   inviteCode: string;
 }
 
+/** 期望接口抛错且错误信息包含指定文案；返回不符合时的说明 */
+async function expectReject(path: string, options: { method?: string; body?: unknown; token?: string }, keyword: string): Promise<string> {
+  try {
+    await api(path, options);
+  } catch (e) {
+    const msg = (e as Error).message;
+    return msg.includes(keyword) ? '' : `抛错但不含「${keyword}」: ${msg}`;
+  }
+  return '未抛错';
+}
+
 async function main(): Promise<void> {
   console.log('=== 太阳线会员系统 · 全链路 E2E ===\n');
 
@@ -208,9 +219,8 @@ async function main(): Promise<void> {
     /* ---------- 3. 产生业绩 ---------- */
     console.log('\n[3] 下单产生业绩（至尊卡 20000/单，权益值全额抵扣）');
     const day1 = new Date().toISOString().slice(0, 10);
-    // 直推奖第 1 期 dueAt 为订单完成日的次日 UTC 16:00，
-    // 订单常在本 UTC 日的下午完成，故需再往后一天结算才能覆盖该分期的到期条件
-    const day2 = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
+    // 直推奖第 1 期到期 = 订单完成日次日 UTC 00:00，结算该日释放第 1 期（不会带上第 2 期）
+    const day2 = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
 
     const settle = async (date: string) => {
       const r = await api<any>('/api/admin/settlements/daily/rerun', {
@@ -230,10 +240,10 @@ async function main(): Promise<void> {
 
     for (const tag of BUYERS) {
       const account = accounts.get(tag)!;
-      await api(`/api/admin/equity/${account.userId}/adjust`, {
+      await api(`/api/admin/wallets/${account.userId}/adjust`, {
         method: 'POST',
         token: admin.token,
-        body: { amount: ORDER_AMOUNT, reason: `E2E 授予 ${tag} 购卡权益值` },
+        body: { amount: ORDER_AMOUNT, reason: `E2E 充值 ${tag} 购卡钱包` },
       });
     }
 
@@ -244,7 +254,7 @@ async function main(): Promise<void> {
       const order = await api<any>('/api/orders', {
         method: 'POST',
         token: account.token,
-        body: { type: 1, packageId: PACKAGE_ID, useEquity: true, useBalance: false },
+        body: { type: 1, packageId: PACKAGE_ID, useBalance: true },
       });
       await api(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
         method: 'POST',
@@ -473,6 +483,113 @@ async function main(): Promise<void> {
       '数权转账记录可查询且状态为已完成',
       (records.list ?? []).some((r: any) => r.transferNo === transferResult.transferNo && r.status === 'COMPLETED'),
       records.list,
+    );
+
+    /* ---------- 14. 权益值 = 转账/可转出额度：用完暂停计酬，复消恢复 ---------- */
+    console.log('\n[14] 权益值 = 转账额度（不参与下单抵扣；用完 → 暂停计酬；复消恢复）');
+    const eqFromTag = 'L1';
+    const eqToTag = 'L2';
+    const eqFrom = accounts.get(eqFromTag)!;
+    const eqTo = accounts.get(eqToTag)!;
+
+    // 下单只扣钱包余额，权益值应保持购卡获赠的 60000 不变
+    const [eqBefore, eqToBefore] = await Promise.all([
+      api<any>('/api/me/equity', { token: eqFrom.token }),
+      api<any>('/api/me/equity', { token: eqTo.token }),
+    ]);
+    const eqTotal = num(eqBefore.balance);
+    check(
+      `${eqFromTag} 购卡获赠权益值 ${eqTotal}，下单不抵扣权益值`,
+      eqTotal === 60000 && num(eqBefore.totalGranted) === 60000,
+      { balance: eqTotal, totalGranted: num(eqBefore.totalGranted) },
+    );
+
+    // 复消前置：额度未用完时不得复消
+    const rejectMsg = await expectReject(
+      '/api/orders',
+      { method: 'POST', token: eqTo.token, body: { type: 3, packageId: PACKAGE_ID, useBalance: true } },
+      '权益值尚未用完',
+    );
+    check(`${eqToTag} 额度未用完时复消被拒`, rejectMsg === '', rejectMsg);
+
+    // 转出方实名 + 转账支付密码
+    await api('/api/me/realname', {
+      method: 'POST',
+      token: eqFrom.token,
+      body: { realName: 'E2E L1', idCard: '110101199001011235' },
+    });
+    await api('/api/me/transfer-password', {
+      method: 'POST',
+      token: eqFrom.token,
+      body: { newPassword: '654321' },
+    });
+
+    // 全额转出：新账号大额触发风控，需管理端复核
+    const eqTransfer = await api<any>('/api/me/equity/transfers', {
+      method: 'POST',
+      token: eqFrom.token,
+      body: { toPhone: eqTo.phone, amount: eqTotal, paymentPassword: '654321', remark: 'E2E 权益值全额转出' },
+    });
+    check('新账号大额权益值转出触发人工复核标记', eqTransfer.riskFlag === 1, eqTransfer);
+
+    const eqAfterOut = await api<any>('/api/me/equity', { token: eqFrom.token });
+    check(`${eqFromTag} 转出后权益值余额 = 0`, num(eqAfterOut.balance) === 0, num(eqAfterOut.balance));
+
+    const eqFromDetail = await api<any>(`/api/admin/members/${eqFrom.userId}`, { token: admin.token });
+    check(
+      `${eqFromTag} 额度用完 → equityStatus = 1（暂停计酬）`,
+      eqFromDetail.equityStatus === 1,
+      eqFromDetail.equityStatus,
+    );
+
+    // 管理端复核通过 → 接收方入账
+    const eqRecords = await api<any>('/api/me/transfers/equity?page=1', { token: eqFrom.token });
+    const eqRecord = (eqRecords.list ?? []).find((r: any) => r.transferNo === eqTransfer.transferNo);
+    const reviewed = await api<any>(`/api/admin/transfers/${eqRecord.id}/review`, {
+      method: 'POST',
+      token: admin.token,
+      body: { action: 'APPROVE', platform: 'equity' },
+    });
+    check('管理端复核通过后转账完成', reviewed.status === 'COMPLETED', reviewed);
+
+    const eqToAfter = await api<any>('/api/me/equity', { token: eqTo.token });
+    check(
+      `${eqToTag} 接收方权益值增加 ${eqTotal}`,
+      num(eqToAfter.balance) - num(eqToBefore.balance) === eqTotal,
+      { before: num(eqToBefore.balance), after: num(eqToAfter.balance) },
+    );
+
+    // 复消：充值钱包后按档位全额下单，完成后恢复计酬与额度
+    await api(`/api/admin/wallets/${eqFrom.userId}/adjust`, {
+      method: 'POST',
+      token: admin.token,
+      body: { amount: ORDER_AMOUNT, reason: `E2E 充值 ${eqFromTag} 复消钱包` },
+    });
+    const repurchase = await api<any>('/api/orders', {
+      method: 'POST',
+      token: eqFrom.token,
+      body: { type: 3, packageId: PACKAGE_ID, useBalance: true },
+    });
+    await api(`/api/admin/orders/${encodeURIComponent(repurchase.orderNo)}/deliver`, {
+      method: 'POST',
+      token: admin.token,
+    });
+    await api(`/api/orders/${encodeURIComponent(repurchase.orderNo)}/confirm`, {
+      method: 'POST',
+      token: eqFrom.token,
+    });
+
+    const eqRestored = await api<any>('/api/me/equity', { token: eqFrom.token });
+    check(
+      `${eqFromTag} 复消后权益值恢复 ${eqTotal}`,
+      num(eqRestored.balance) === eqTotal && num(eqRestored.totalGranted) - num(eqBefore.totalGranted) === eqTotal,
+      { balance: num(eqRestored.balance), totalGranted: num(eqRestored.totalGranted) },
+    );
+    const eqFromDetail2 = await api<any>(`/api/admin/members/${eqFrom.userId}`, { token: admin.token });
+    check(
+      `${eqFromTag} 复消后 equityStatus = 0（恢复计酬）`,
+      eqFromDetail2.equityStatus === 0,
+      eqFromDetail2.equityStatus,
     );
 
     console.log(`\n=== 结果：通过 ${passed} 项，失败 ${failed} 项 ===`);

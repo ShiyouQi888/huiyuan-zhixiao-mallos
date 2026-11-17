@@ -34,7 +34,7 @@ export class OrderService {
     return `${date}${Math.floor(Math.random() * 900000 + 100000)}`;
   }
 
-  /** 下单：按权益值、钱包、现金的顺序抵扣；扣款与订单写入使用同一事务。 */
+  /** 下单：权益值为「转账/可转出额度」，不参与消费抵扣；仅钱包余额抵扣。 */
   async create(params: CreateOrderParams) {
     const no = this.orderNo();
     return this.prisma.$transaction(async (tx) => {
@@ -99,30 +99,19 @@ export class OrderService {
         throw Err.param('订单类型不合法');
       }
 
-      let equityDeduct = 0n;
+      // 权益值只作转账/可转出额度，不用于下单抵扣
+      const equityDeduct = 0n;
       let balanceDeduct = 0n;
-      if (params.useEquity !== false) {
-        const [account, activeLots] = await Promise.all([
-          tx.equityAccount.findUnique({ where: { userId: params.userId } }),
-          tx.equityLot.aggregate({ where: { userId: params.userId, status: 'ACTIVE', remaining: { gt: 0n } }, _sum: { remaining: true } }),
-        ]);
-        const lotBalance = activeLots._sum.remaining ?? 0n;
-        const accountBalance = account?.balance ?? 0n;
-        const usableEquity = lotBalance < accountBalance ? lotBalance : accountBalance;
-        equityDeduct = usableEquity < amount ? usableEquity : amount;
-        if (equityDeduct > 0n) await this.equity.deductFIFO(params.userId, equityDeduct, 'order_equity', no, 2, tx);
-      }
-
-      const rest = amount - equityDeduct;
+      const rest = amount;
       if (rest > 0n && params.useBalance !== false) {
         const account = await this.wallet.get(params.userId, tx);
         const available = account.balance - account.frozen;
         balanceDeduct = available < rest ? available : rest;
         if (balanceDeduct > 0n) await this.wallet.debit(params.userId, balanceDeduct, 'order_balance', no, `订单 ${no} 余额抵扣`, tx);
       }
-      const cashPay = amount - equityDeduct - balanceDeduct;
+      const cashPay = amount - balanceDeduct;
       if (cashPay > 0n) {
-        throw Err.conflict('订单仍需现金支付，但系统尚未配置现金支付渠道。请调整权益值或钱包抵扣后重试');
+        throw Err.conflict('订单仍需现金支付，但系统尚未配置现金支付渠道。请充值钱包余额后重试');
       }
       const order = await tx.order.create({
         data: {
@@ -230,9 +219,10 @@ export class OrderService {
         const total = BigInt(Math.round(Number(order.amount) * rate));
         const periods = await this.config.getNumber('bonus.direct_periods', 20);
         if (total > 0n) {
+          // 统一 UTC 口径：第 1 期到期 = 订单完成日次日 UTC 00:00（与结算日 UTC 00:00 对齐，避免时区边界漂移）
           const startAt = new Date(now);
-          startAt.setHours(0, 0, 0, 0);
-          startAt.setDate(startAt.getDate() + 1);
+          startAt.setUTCHours(0, 0, 0, 0);
+          startAt.setUTCDate(startAt.getUTCDate() + 1);
           const plan = await tx.bonusPlan.create({
             data: {
               orderId: order.id,
@@ -246,7 +236,7 @@ export class OrderService {
           });
           for (let i = 1; i <= periods; i++) {
             const due = new Date(startAt);
-            due.setDate(due.getDate() + i - 1);
+            due.setUTCDate(due.getUTCDate() + i - 1);
             await tx.bonusStage.create({
               data: { planId: plan.id, periodNo: i, amount: total / BigInt(periods), dueAt: due, status: 'PENDING' },
             });

@@ -51,6 +51,12 @@ const TX_LABEL: Record<string, string> = {
   token_bonus: '奖金数权',
   token_transfer_in: '数权转入',
   token_transfer_out: '数权转出',
+  equity_grant: '权益值发放',
+  equity_transfer_out: '权益值转出',
+  equity_transfer_in: '权益值转入',
+  equity_transfer_refund: '权益值退款',
+  equity_expire: '权益值过期',
+  order_balance: '订单余额抵扣',
 };
 function txLabel(bizType: string) {
   return TX_LABEL[bizType] ?? bizType;
@@ -169,11 +175,12 @@ onMounted(load);
     </section>
 
     <section v-else-if="tab === 'equity'" class="asset-overview asset-overview--equity">
-      <div class="asset-overview-top"><span class="asset-icon"><BadgeDollarSign :size="19" aria-hidden="true" /></span><span>可用权益值</span></div>
+      <div class="asset-overview-top"><span class="asset-icon"><BadgeDollarSign :size="19" aria-hidden="true" /></span><span>可用转账额度（权益值）</span></div>
       <div class="asset-balance">{{ money(equity?.balance) }}</div>
       <div class="asset-overview-foot">
-        <span>{{ equity?.lots?.length ?? 0 }} 个有效批次</span><span>按到期时间优先抵扣</span>
+        <span>{{ equity?.lots?.length ?? 0 }} 个有效批次</span><span>按到期时间优先转出</span>
       </div>
+      <p class="asset-description">权益值是可转账/可转出的额度，不参与消费抵扣；额度用完后可通过复消恢复计酬。</p>
       <button v-if="store.has('equity.transfer') && store.profile?.transferPasswordSet" type="button" class="asset-transfer-button" @click="error = ''; showTransfer = true">发起转让</button>
       <button v-else-if="store.has('equity.transfer')" type="button" class="asset-transfer-button" @click="router.push('/security/transfer-password')">设置支付密码</button>
       <div v-if="equity?.lots?.length" class="equity-lots">

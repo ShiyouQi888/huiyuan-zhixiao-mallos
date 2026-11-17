@@ -140,6 +140,11 @@ export class EquityService {
   ): Promise<{ usages: LotUsage[]; earliestExpireAt: Date }> {
     const usages = await this.deductFIFO(fromId, amount, 'equity_transfer_out', transferNo, 4);
     if (!usages.length) throw new BusinessException(3001, '权益值余额不足');
+    // 权益值 = 转账/可转出额度：转出后额度归零即视为用完，标记暂停计酬（等待复消恢复）
+    const account = await this.prisma.equityAccount.findUnique({ where: { userId: fromId } });
+    if (account && account.balance <= 0n) {
+      await this.prisma.user.updateMany({ where: { id: fromId }, data: { equityStatus: 1 } });
+    }
     const earliestExpireAt = usages.reduce(
       (min, u) => (u.expireAt < min ? u.expireAt : min),
       usages[0].expireAt,
@@ -192,6 +197,10 @@ export class EquityService {
       await tx.equityTransaction.create({
         data: { userId: fromId, type: 5, changeAmount: amount, balanceAfter, bizType: 'equity_transfer_refund', bizId: transferNo },
       });
+      // 额度随退款恢复：若此前因「额度用完」被标记暂停计酬，此处解除（暂停只由额度耗尽触发）
+      if (balanceAfter > 0n) {
+        await tx.user.updateMany({ where: { id: fromId, equityStatus: 1 }, data: { equityStatus: 0 } });
+      }
     });
   }
 

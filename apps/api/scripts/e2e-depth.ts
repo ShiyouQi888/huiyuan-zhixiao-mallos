@@ -225,20 +225,20 @@ async function main(): Promise<void> {
 
   try {
     /* ---------- 4. 最深层下单产生业绩 ---------- */
-    console.log('\n[4] 最深层下单（至尊卡 20000，权益值全额抵扣）');
+    console.log('\n[4] 最深层下单（至尊卡 20000，钱包余额全额抵扣）');
     const day1 = new Date().toISOString().slice(0, 10);
-    // 直推奖第 1 期 dueAt 为订单完成日的次日 UTC 16:00，需再往后一天结算才覆盖
-    const day2 = new Date(Date.now() + 2 * 86400_000).toISOString().slice(0, 10);
+    // 直推奖第 1 期到期 = 订单完成日次日 UTC 00:00，结算该日释放第 1 期
+    const day2 = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
 
-    await api(`/api/admin/equity/${deepest.userId}/adjust`, {
+    await api(`/api/admin/wallets/${deepest.userId}/adjust`, {
       method: 'POST',
       token: admin.token,
-      body: { amount: ORDER_AMOUNT, reason: `深层 E2E 授予 L${deepest.depth} 购卡权益值` },
+      body: { amount: ORDER_AMOUNT, reason: `深层 E2E 充值 L${deepest.depth} 购卡钱包` },
     });
     const order = await api<any>('/api/orders', {
       method: 'POST',
       token: deepest.token,
-      body: { type: 1, packageId: PACKAGE_ID, useEquity: true, useBalance: false },
+      body: { type: 1, packageId: PACKAGE_ID, useBalance: true },
     });
     await api(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
       method: 'POST',

@@ -14,7 +14,6 @@ const selectedImageIndex = ref(0);
 const quantity = ref(1);
 const loading = ref(true);
 const buying = ref(false);
-const equityModal = ref(false);
 const checkoutOpen = ref(false);
 const addresses = ref<any[]>([]);
 const selectedAddressId = ref('');
@@ -68,19 +67,13 @@ async function buy() {
       productId: Number(product.value.id),
       addressId: selectedAddressId.value,
       quantity: quantity.value,
-      useEquity: true,
       useBalance: true,
     });
     Toast('下单成功', 'success');
     checkoutOpen.value = false;
     router.push('/orders');
   } catch (e: any) {
-    const message = e.message ?? '下单失败，请稍后重试';
-    if (/权益值.*不足/.test(message)) {
-      equityModal.value = true;
-    } else {
-      Toast(message, 'danger');
-    }
+    Toast(e.message ?? '下单失败，请稍后重试', 'danger');
   } finally {
     buying.value = false;
   }
@@ -145,7 +138,7 @@ async function buy() {
           <div><strong>{{ product.category?.name ?? '精选商品' }}</strong><span>所属分类</span></div>
         </div>
         <div class="detail-service">
-          <span><CircleDollarSign :size="13" aria-hidden="true" />支持权益值抵扣</span>
+          <span><CircleDollarSign :size="13" aria-hidden="true" />权益值可转账</span>
           <span><Wallet :size="13" aria-hidden="true" />支持余额支付</span>
           <span v-if="hasMemberPrice"><BadgeCheck :size="13" aria-hidden="true" />会员专属价格</span>
         </div>
@@ -174,12 +167,6 @@ async function buy() {
       </div>
     </template>
 
-    <AppModal v-model="equityModal" eyebrow="下单提示" title="权益值余额不足" alert
-      description="本单需使用权益值抵扣，当前账户可用权益值不足。"
-      hint="确认后将前往资产中心。" confirm-text="确认"
-      @confirm="equityModal = false; router.push('/assets')">
-      <div class="app-modal-note">可前往资产中心查看权益值明细，或购买会员礼包补充权益值后再下单。</div>
-    </AppModal>
     <AppModal v-model="checkoutOpen" eyebrow="确认订单" title="确认配送信息"
       description="下单后会保存当前地址快照，用于本笔订单配送。"
       :confirm-loading="buying" :confirm-disabled="!selectedAddress || !canBuy"

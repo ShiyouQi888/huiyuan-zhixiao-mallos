@@ -73,19 +73,19 @@ async function main(): Promise<void> {
   const team = await api<any[]>('/api/me/team', { token: parent.token });
   check('直属下级包含新注册用户', team.some((u) => u.phone === childPhone));
 
-  // 3. 下级购买金卡（管理端授予权益值后全额抵扣，系统无现金支付通道）
+  // 3. 下级购买金卡（权益值为转账额度不参与抵扣，管理端充值钱包后全额余额抵扣）
   console.log('\n[3] 下单与权益值发放');
   const childInfo = await api<any>('/api/me', { token: child.token });
-  await api(`/api/admin/equity/${childInfo.id}/adjust`, {
-    method: 'POST', token: admin.token, body: { amount: 5000, reason: '烟雾测试授予购卡权益值' },
+  await api(`/api/admin/wallets/${childInfo.id}/adjust`, {
+    method: 'POST', token: admin.token, body: { amount: 5000, reason: '烟雾测试充值购卡钱包' },
   });
   const order = await api<any>('/api/orders', {
     method: 'POST',
     token: child.token,
-    body: { type: 1, packageId: 2, useEquity: true, useBalance: false },
+    body: { type: 1, packageId: 2, useBalance: true },
   });
   check('订单已付款并等待管理端交付（status=1）', order.status === 1, order.status);
-  check('订单金额 5000 全额权益值抵扣', order.amount === 5000 && order.equityDeduct === 5000 && order.cashPay === 0, order);
+  check('订单金额 5000 全额钱包余额抵扣', order.amount === 5000 && order.balanceDeduct === 5000 && order.equityDeduct === 0, order);
 
   await api(`/api/admin/orders/${encodeURIComponent(order.orderNo)}/deliver`, {
     method: 'POST', token: admin.token,
@@ -106,9 +106,8 @@ async function main(): Promise<void> {
   console.log('\n[4] 每日结算');
   const today = new Date();
   const perfDate = today.toISOString().slice(0, 10);
-  // 直推奖第 1 期 dueAt 为订单完成日的次日 UTC 16:00，
-  // 需再往后一天结算才能覆盖该分期的到期条件（与 e2e-full 保持一致）
-  const releaseDate = new Date(today.getTime() + 2 * 86400_000).toISOString().slice(0, 10);
+  // 直推奖第 1 期到期 = 订单完成日次日 UTC 00:00，结算该日即可释放第 1 期（不会带上第 2 期）
+  const releaseDate = new Date(today.getTime() + 86400_000).toISOString().slice(0, 10);
 
   // 超管走审批流会单人直通，返回 { direct: true, result: {...} }
   const settleResult = (r: any) => (r.result ?? r);

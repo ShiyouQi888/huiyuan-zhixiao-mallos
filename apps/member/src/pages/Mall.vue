@@ -116,7 +116,7 @@ function categoryTone(index: number) {
       <div class="store-promo-copy">
         <div class="store-promo-label"><BadgePercent :size="13" aria-hidden="true" /> 会员专享</div>
         <h2>精选好物 权益直抵</h2>
-        <p>会员专属价格，结算时可使用权益值与余额</p>
+        <p>会员专属价格，结算时使用钱包余额</p>
         <button type="button" class="promo-action" @click="router.push('/products')">
           开始选购 <ArrowRight :size="12" aria-hidden="true" />
         </button>
@@ -193,7 +193,7 @@ function categoryTone(index: number) {
           <span class="package-home-top"><span class="package-level"><BadgePercent :size="13" aria-hidden="true" /> {{ item.level }} 级会员</span><ChevronRight :size="15" aria-hidden="true" /></span>
           <span class="package-name">{{ item.name }}</span>
           <span class="package-home-price">¥{{ money(item.price) }}<small>礼包价格</small></span>
-          <span class="package-benefit">包含 <strong>¥{{ money(item.equityValue) }}</strong> 权益值</span>
+          <span class="package-benefit">包含 <strong>¥{{ money(item.equityValue) }}</strong> 转账额度</span>
           <span class="package-home-duration">有效期 {{ item.durationDays }} 天</span>
         </button>
       </div>

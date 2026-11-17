@@ -14,7 +14,6 @@ const store = useUserStore();
 const packages = ref<any[]>([]);
 const profile = ref<any>(null);
 const selected = ref<{ item: any; mode: 'purchase' | 'upgrade' | 'repurchase' } | null>(null);
-const useEquity = ref(true);
 const useBalance = ref(true);
 const busy = ref(false);
 const loading = ref(true);
@@ -53,9 +52,8 @@ const visiblePackages = computed(() => packages.value.filter((item) => {
 }));
 const profileStatusLabel = computed(() => {
   if (!currentPackage.value) return '尚未开通会员档位';
-  return profile.value?.equityStatus === 1 ? '权益值已用完 · 可复消恢复计酬' : '会员权益正常';
+  return profile.value?.equityStatus === 1 ? '转账额度已用完 · 可复消恢复计酬' : '会员权益正常';
 });
-const canUseEquity = computed(() => store.has('equity.account'));
 const canUseBalance = computed(() => store.has('wallet.account'));
 
 async function load() {
@@ -64,7 +62,6 @@ async function load() {
   try {
     await store.loadProfile();
     profile.value = store.profile;
-    useEquity.value = canUseEquity.value;
     useBalance.value = canUseBalance.value;
     packages.value = await api<any[]>('/packages');
   } catch (e: any) {
@@ -95,7 +92,6 @@ async function buy() {
     const order = await post('/orders', {
       type: selected.value.mode === 'upgrade' ? 2 : selected.value.mode === 'repurchase' ? 3 : 1,
       packageId: selected.value.item.id,
-      useEquity: useEquity.value,
       useBalance: useBalance.value,
     });
     Toast(`${selectedModeLabel.value}订单 ${order.orderNo} 已创建`, 'success');
@@ -122,7 +118,7 @@ async function buy() {
       </div>
       <div v-if="currentPackage" class="current-membership-meta">
         <span>档位价格 <strong>¥{{ money(currentPackage.price) }}</strong></span>
-        <span>权益值 <strong>¥{{ money(profile.equityAccount?.balance ?? 0) }}</strong></span>
+        <span>转账额度 <strong>¥{{ money(profile.equityAccount?.balance ?? 0) }}</strong></span>
       </div>
     </section>
 
@@ -145,7 +141,7 @@ async function buy() {
         <div class="package-price">¥{{ money(item.price) }}</div>
         <div class="package-duration">有效期 {{ item.durationDays }} 天</div>
         <div class="package-benefit">
-          <div><BadgeCheck :size="15" aria-hidden="true" /> 获得权益值</div>
+          <div><BadgeCheck :size="15" aria-hidden="true" /> 获得转账额度（权益值）</div>
           <strong>¥{{ money(item.equityValue) }}</strong>
         </div>
         <div v-if="item.items?.length" class="package-item-list">
@@ -166,21 +162,16 @@ async function buy() {
 
     <div class="package-note">
       <BadgeCheck :size="15" aria-hidden="true" />
-      <span>下单时可选择使用权益值与钱包余额抵扣；权益值有效期以平台规则为准。</span>
+      <span>下单以钱包余额抵扣；权益值是可转账/可转出的额度，不参与消费抵扣，额度用完后可通过复消恢复。</span>
     </div>
 
     <AppModal v-model="confirmOpen" eyebrow="订单确认" :title="`${selectedModeLabel} · ${selected?.item.name ?? ''}`"
       description="核对本次应付金额与到账权益值后提交订单。" :confirm-loading="busy"
       :confirm-text="`确认提交 · ¥${money(selectedAmount)}`"
-      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，新增权益值为两个档位权益值之差。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后恢复计酬并重新获得权益值。' : '提交后将创建订单；权益值与钱包余额按规则抵扣，剩余金额以订单为准。'" @confirm="buy">
+      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，新增权益值为两个档位权益值之差。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后恢复计酬并重新获得转账额度。' : '提交后将创建订单；本单以钱包余额抵扣，剩余金额以订单为准。'" @confirm="buy">
       <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '档位差额' : '档位金额' }}</span><strong>¥{{ money(selectedAmount) }}</strong></div>
-      <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '新增权益值' : '到账权益值' }}</span><strong class="green">¥{{ money(selectedEquity) }}</strong></div>
+      <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '新增额度' : '到账额度（权益值）' }}</span><strong class="green">¥{{ money(selectedEquity) }}</strong></div>
       <div v-if="selected?.mode === 'upgrade'" class="order-summary-row"><span>升级后档位</span><strong>{{ selected?.item.name }}</strong></div>
-      <label v-if="canUseEquity" class="deduction-option">
-        <input v-model="useEquity" type="checkbox" />
-        <span>使用权益值抵扣</span>
-        <span class="deduction-check"><Check :size="13" /></span>
-      </label>
       <label v-if="canUseBalance" class="deduction-option">
         <input v-model="useBalance" type="checkbox" />
         <span>使用钱包余额抵扣</span>

@@ -16,7 +16,7 @@ defineProps<{
       <p>{{ description }}</p>
       <div class="auth-benefits" aria-label="会员商城服务">
         <span>会员专属价</span>
-        <span>权益值抵扣</span>
+        <span>权益值可转账</span>
         <span>余额支付</span>
       </div>
     </header>

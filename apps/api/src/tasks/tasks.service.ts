@@ -27,12 +27,9 @@ export class TasksService {
 
   @Cron('0 3 * * *', { name: 'expire-equity' })
   async expireEquity(): Promise<void> {
+    // 权益值过期仅作废批次，不暂停计酬（复消仅由「转账额度用完」触发）
     const count = await this.equity.expireLots();
     if (count) this.logger.warn(`已过期 ${count} 个权益值批次`);
-    const users = await this.equity.pendingSuspendUsers();
-    for (const userId of users) {
-      await this.equity.setEquityStatus(userId, 1);
-    }
   }
 
   @Cron('0 4 * * *', { name: 'reconcile' })

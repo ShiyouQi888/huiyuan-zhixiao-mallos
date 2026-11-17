@@ -222,7 +222,7 @@ export function Assets() {
                     <th className="th text-right">可用余额</th><th className="th text-right">累计入账 / 出账</th><th className="th text-right">操作</th>
                   </>}
                   {tab === 'equity' && <>
-                    <th className="th">会员</th><th className="th text-right">可用权益值</th><th className="th text-right">累计发放</th>
+                    <th className="th">会员</th><th className="th text-right">可用转账额度</th><th className="th text-right">累计发放</th>
                     <th className="th text-right">已消费</th><th className="th text-right">已过期</th><th className="th text-right">操作</th>
                   </>}
                   {tab === 'lots' && <>
