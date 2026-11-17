@@ -32,7 +32,31 @@ export class MemberController {
     const enabled = await Promise.all(['package.purchase', 'member.upgrade', 'member.repurchase']
       .map((code) => this.features.isAvailable(code, 'h5', current.rankLevel)));
     if (!enabled.some(Boolean)) throw Err.featureDisabled('礼包购买、升级与复消当前均不可用');
-    return this.prisma.package.findMany({ where: { status: 1 }, orderBy: { level: 'asc' } });
+    const packages = await this.prisma.package.findMany({
+      where: { status: 1 },
+      orderBy: { level: 'asc' },
+      include: {
+        productBinds: {
+          where: { product: { status: 1 } },
+          orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+          include: {
+            product: {
+              select: {
+                id: true, name: true, subtitle: true, images: true,
+                price: true, originalPrice: true, stock: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    return packages.map(({ productBinds, ...item }) => ({
+      ...item,
+      products: productBinds.map(({ product, exclusivePrice }) => ({
+        ...product,
+        effectivePrice: exclusivePrice ?? product.price,
+      })),
+    }));
   }
 
   @Get('features')

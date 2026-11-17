@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { api, money } from '../api';
+import { api, money, resolveAssetUrl } from '../api';
 import { useUserStore } from '../stores/user';
 import SectionHeading from '../components/SectionHeading.vue';
 import ProductCard from '../components/ProductCard.vue';
 import EmptyState from '../components/EmptyState.vue';
 import {
   ArrowRight, BadgePercent, ChefHat, ChevronRight, ClipboardList, Cpu, Gift,
-  HeartPulse, LayoutGrid, Moon, Search, Smartphone, Sun, Tags, UserPlus, UserRound,
+  HeartPulse, LayoutGrid, Moon, Package, Search, Smartphone, Sun, Tags, UserPlus, UserRound,
 } from 'lucide-vue-next';
 import { applyThemeMode, getThemeMode, type ThemeMode } from '../theme';
 
@@ -194,6 +194,16 @@ function categoryTone(index: number) {
           <span class="package-name">{{ item.name }}</span>
           <span class="package-home-price">¥{{ money(item.price) }}<small>礼包价格</small></span>
           <span class="package-benefit">包含 <strong>¥{{ money(item.equityValue) }}</strong> 权益值</span>
+          <span v-if="item.products?.length" class="package-home-products">
+            <span class="package-home-products-label">关联商品</span>
+            <span v-for="product in item.products.slice(0, 2)" :key="product.id" class="package-home-product">
+              <img v-if="product.images?.[0]" :src="resolveAssetUrl(product.images[0])" alt="" aria-hidden="true" />
+              <span v-else class="package-home-product-placeholder"><Package :size="12" aria-hidden="true" /></span>
+              <span>{{ product.name }}</span>
+            </span>
+            <span v-if="item.products.length > 2" class="package-home-products-more">+{{ item.products.length - 2 }}</span>
+          </span>
+          <span v-else class="package-home-products-empty">暂未关联商品</span>
           <span class="package-home-duration">有效期 {{ item.durationDays }} 天</span>
         </button>
       </div>
@@ -228,4 +238,11 @@ function categoryTone(index: number) {
   color: var(--brand);
   text-decoration: none;
 }
+.package-home-products { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 8px; overflow: hidden; }
+.package-home-products-label { flex: 0 0 auto; color: var(--muted); font-size: 8px; }
+.package-home-product { display: inline-flex; min-width: 0; align-items: center; gap: 4px; padding: 2px 5px 2px 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text-2); font-size: 8px; }
+.package-home-product > img, .package-home-product-placeholder { display: inline-flex; width: 17px; height: 17px; flex: 0 0 auto; align-items: center; justify-content: center; overflow: hidden; border-radius: 5px; background: var(--surface-2); object-fit: cover; }
+.package-home-product > span:last-child { max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.package-home-products-more { flex: 0 0 auto; color: var(--muted); font-size: 8px; }
+.package-home-products-empty { margin-top: 8px; color: var(--muted); font-size: 8.5px; }
 </style>
