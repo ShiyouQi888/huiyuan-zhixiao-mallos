@@ -36,8 +36,8 @@ onMounted(async () => {
       <div class="divider" style="margin:20px 0"/>
       <div class="row between">
         <div>
-          <div class="subtitle">团队累计业绩</div>
-          <div style="font-size:22px;font-weight:650;margin-top:6px">¥{{ money(rank?.totalPerformance) }}</div>
+          <div class="subtitle">团队累计计酬 PV</div>
+          <div style="font-size:22px;font-weight:650;margin-top:6px">{{ money(rank?.totalPerformance) }} PV</div>
         </div>
         <div style="text-align:right">
           <div class="subtitle">团队奖费率</div>
@@ -47,7 +47,7 @@ onMounted(async () => {
       <div v-if="rank?.nextRank" style="margin-top:18px">
         <div class="row between subtitle" style="font-size:11px">
           <span>距 {{ rank.nextRank.name }}</span>
-          <span>还差 ¥{{ money(rank.nextRank.gap) }}</span>
+          <span>还差 {{ money(rank.nextRank.gap) }} PV</span>
         </div>
         <div class="progress-track" style="height:5px;border-radius:5px;margin-top:8px;overflow:hidden">
           <div style="height:100%;border-radius:5px;background:linear-gradient(90deg,#6366f1,#a78bfa)"

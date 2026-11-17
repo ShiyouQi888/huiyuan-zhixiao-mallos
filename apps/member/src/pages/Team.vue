@@ -23,7 +23,7 @@ function countNodes(n: any): number {
 <template>
   <div class="page">
     <div class="title">我的团队</div>
-    <div class="subtitle">团队业绩每日归集，自动向上累加</div>
+    <div class="subtitle">团队计酬PV每日归集，1 PV = ¥1 奖金基数</div>
 
     <div class="grid-2" style="margin-top:18px">
       <div class="card">

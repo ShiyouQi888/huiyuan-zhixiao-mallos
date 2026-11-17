@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Save, Settings2, ShieldCheck } from 'lucide-react';
 import { api, put } from '../api';
+import { BrandSettingsPanel } from './BrandSettingsPanel';
 import {
   Badge, Button, Card, CardHeader, Empty, Field, Modal, PageHeader, TableSkeleton, Tabs, Toast, useConfirm,
 } from '../components/ui';
@@ -20,7 +21,7 @@ const PERMISSION_ROWS = [
 const ROLE_TONES = ['brand', 'info', 'success', 'neutral'] as const;
 
 export function SystemSettings() {
-  const [tab, setTab] = useState<'configs' | 'roles'>('configs');
+  const [tab, setTab] = useState<'configs' | 'brand' | 'roles'>('configs');
   const [configs, setConfigs] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,14 +82,15 @@ export function SystemSettings() {
       <Tabs
         className="mb-4"
         value={tab}
-        onChange={(value) => setTab(value as 'configs' | 'roles')}
+        onChange={(value) => setTab(value as 'configs' | 'brand' | 'roles')}
         items={[
           { value: 'configs', label: '系统配置', count: configs.length },
+          { value: 'brand', label: '品牌与备案' },
           { value: 'roles', label: '角色权限' },
         ]}
       />
 
-      {tab === 'configs' ? (
+      {tab === 'brand' ? <BrandSettingsPanel /> : tab === 'configs' ? (
         <Card className="overflow-hidden">
           <CardHeader
             title="全局配置项"

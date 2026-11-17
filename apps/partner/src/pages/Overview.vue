@@ -103,8 +103,8 @@ const entries = computed(() => {
       </div>
 
       <div class="rank-performance">
-        <span>团队累计业绩</span>
-        <strong>¥{{ money(rank?.totalPerformance) }}</strong>
+        <span>团队累计计酬 PV</span>
+        <strong>{{ money(rank?.totalPerformance) }} PV</strong>
       </div>
 
       <ProgressBar
@@ -112,7 +112,7 @@ const entries = computed(() => {
         class="rank-progress"
         :value="rankProgress"
         :label="`距 ${rank.nextRank.name}`"
-        :hint="`还差 ¥${money(rank.nextRank.gap)}`"
+        :hint="`还差 ${money(rank.nextRank.gap)} PV`"
       />
       <div v-else-if="isTopRank" class="rank-state rank-state--complete">
         <Check :size="14" aria-hidden="true" />已达到最高职级

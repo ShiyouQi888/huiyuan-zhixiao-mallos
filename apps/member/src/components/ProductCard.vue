@@ -31,9 +31,10 @@ watch(imageUrl, () => { imageFailed.value = false; });
         <span class="product-card-price">¥{{ money(memberPrice) }}</span>
         <span v-if="Number(product.originalPrice) > memberPrice" class="product-card-original">¥{{ money(product.originalPrice) }}</span>
       </span>
-      <span v-if="stock <= 10" class="product-card-meta">
+      <span class="product-card-meta">
+        <span class="product-card-pv">PV {{ Number(product.pv ?? 0).toLocaleString('zh-CN') }}</span>
         <span v-if="stock <= 0" class="product-card-stock product-card-stock--empty">暂时缺货</span>
-        <span v-else class="product-card-stock product-card-stock--low">仅剩 {{ stock }} 件</span>
+        <span v-else-if="stock <= 10" class="product-card-stock product-card-stock--low">仅剩 {{ stock }} 件</span>
       </span>
     </span>
   </button>

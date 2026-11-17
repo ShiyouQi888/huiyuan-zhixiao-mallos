@@ -14,13 +14,16 @@ const compact = (value: number) => {
   return String(value);
 };
 
-function ChartTooltip({ active, payload, label, unit = '' }: any) {
+const formatPv = (value: unknown) => `${Number(value ?? 0).toLocaleString('zh-CN')} PV`;
+
+function ChartTooltip({ active, payload, label, unit = '', format = 'money' }: any) {
   if (!active || !payload?.length) return null;
+  const value = format === 'pv' ? Number(payload[0].value).toLocaleString('zh-CN') : fmtMoney(payload[0].value);
   return (
     <div className="rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-pop">
       <div className="mb-1 text-2xs text-ink-faint">{label}</div>
       <div className="num font-medium text-ink">
-        {fmtMoney(payload[0].value)}<span className="ml-1 text-ink-faint">{unit}</span>
+        {value}<span className="ml-1 text-ink-faint">{unit}</span>
       </div>
     </div>
   );
@@ -75,7 +78,7 @@ export function Reports() {
   const ledgerRows = [
     {
       title: '权益通 · 额度总账', data: issuance?.transferQuota, tone: 'text-accent-ink', icon: <Coins size={15} />,
-      metrics: [['档位累计发放', issuance?.transferQuota?.granted], ['已消耗', issuance?.transferQuota?.used], ['待确认占用', issuance?.transferQuota?.reserved], ['剩余权益通', issuance?.transferQuota?.available]],
+      metrics: [['权益通累计发放', issuance?.transferQuota?.granted], ['钱包转出已用', issuance?.transferQuota?.used], ['待确认转账', issuance?.transferQuota?.reserved], ['剩余权益通', issuance?.transferQuota?.available]],
     },
     {
       title: '钱包余额 · 资金总账', data: issuance?.wallet, tone: 'text-success', icon: <Wallet size={15} />,
@@ -87,7 +90,7 @@ export function Reports() {
     <>
       <PageHeader
         title="数据报表"
-        description={supportView ? '查看近 14 日平台业绩趋势' : '业绩趋势、奖金构成、层级分布与虚拟货币发行总账；数据口径为自然日，每日 02:00 日结后更新'}
+        description={supportView ? '查看近 14 日平台计酬PV趋势' : '计酬PV趋势、奖金构成、层级分布与虚拟货币发行总账；每日 02:00 日结后更新'}
       />
 
       {loading ? (
@@ -105,11 +108,11 @@ export function Reports() {
             <>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard
-                  label="近 14 日平台业绩"
-                  value={fmtMoney(perfTotal)}
+                  label="近 14 日平台计酬PV"
+                  value={formatPv(perfTotal)}
                   icon={<TrendingUp size={17} />}
                   accent="brand"
-                  trend={`日均 ${fmtMoney(perfData.length ? perfTotal / perfData.length : 0)}`}
+                  trend={`日均 ${formatPv(perfData.length ? perfTotal / perfData.length : 0)}`}
                 />
                 <StatCard
                   label="剩余权益通"
@@ -179,22 +182,22 @@ export function Reports() {
           <div className={`mt-4 grid gap-4 ${supportView ? '' : 'lg:grid-cols-2'}`}>
             <Card>
               <CardHeader
-                title="近 14 日平台业绩趋势"
-                description="按日聚合的自营业绩，单位：元"
+                title="近 14 日平台计酬PV趋势"
+                description="按日聚合新订单的计酬PV；1 PV = ¥1 奖金基数"
                 icon={<BarChart3 size={15} />}
                 action={<Badge tone="brand">14 天</Badge>}
               />
               <div className="h-64 px-3 pb-4 pt-4">
                 {perfData.length === 0 || perfTotal === 0 ? (
-                  <Empty text="暂无业绩数据" description="日结完成后会生成平台业绩趋势。" icon={<BarChart3 size={18} />} />
+                  <Empty text="暂无计酬PV数据" description="日结完成后会生成平台计酬PV趋势。" icon={<BarChart3 size={18} />} />
                 ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={perfData} margin={{ top: 4, right: 12, bottom: 0, left: -8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fill: 'var(--ink-4)', fontSize: 11 }} tickLine={false} axisLine={{ stroke: 'var(--line)' }} minTickGap={16} />
                     <YAxis tickFormatter={compact} tick={{ fill: 'var(--ink-4)', fontSize: 11 }} tickLine={false} axisLine={false} width={54} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--hover)' }} />
-                    <Bar dataKey="performance" name="平台业绩" fill="var(--accent)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                    <Tooltip content={<ChartTooltip format="pv" unit="PV" />} cursor={{ fill: 'var(--hover)' }} />
+                    <Bar dataKey="performance" name="平台计酬PV" fill="var(--accent)" radius={[4, 4, 0, 0]} maxBarSize={26} />
                   </BarChart>
                 </ResponsiveContainer>
                 )}

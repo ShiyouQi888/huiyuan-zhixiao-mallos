@@ -1,5 +1,15 @@
 const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000/api';
 
+export function resolveAssetUrl(path: string | null | undefined): string {
+  if (!path) return '';
+  if (/^(?:https?:|data:|blob:)/i.test(path)) return path;
+  try {
+    return new URL(path, new URL(BASE, window.location.origin)).toString();
+  } catch {
+    return path;
+  }
+}
+
 export async function api<T = any>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const token = localStorage.getItem('solar_member_token');
   const res = await fetch(`${BASE}${path}`, {

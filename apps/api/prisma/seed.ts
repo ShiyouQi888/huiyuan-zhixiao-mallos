@@ -20,15 +20,15 @@ const RANKS = [
 ];
 
 const PACKAGES = [
-  { id: 1, level: 1, name: '银卡', price: 2000n, transferQuota: 6000n, durationDays: 365, sort: 1, items: [{ name: '银卡礼包', quantity: 1 }] },
-  { id: 2, level: 2, name: '金卡', price: 5000n, transferQuota: 15000n, durationDays: 365, sort: 2, items: [{ name: '金卡礼包', quantity: 1 }] },
-  { id: 3, level: 3, name: '钻卡', price: 10000n, transferQuota: 30000n, durationDays: 365, sort: 3, items: [{ name: '钻卡礼包', quantity: 1 }] },
-  { id: 4, level: 4, name: '至尊卡', price: 20000n, transferQuota: 60000n, durationDays: 365, sort: 4, items: [{ name: '至尊卡礼包', quantity: 1 }] },
+  { id: 1, level: 1, name: '银卡', price: 2000n, pv: 2000n, transferQuota: 6000n, durationDays: 365, sort: 1, items: [{ name: '银卡礼包', quantity: 1 }] },
+  { id: 2, level: 2, name: '金卡', price: 5000n, pv: 5000n, transferQuota: 15000n, durationDays: 365, sort: 2, items: [{ name: '金卡礼包', quantity: 1 }] },
+  { id: 3, level: 3, name: '钻卡', price: 10000n, pv: 10000n, transferQuota: 30000n, durationDays: 365, sort: 3, items: [{ name: '钻卡礼包', quantity: 1 }] },
+  { id: 4, level: 4, name: '至尊卡', price: 20000n, pv: 20000n, transferQuota: 60000n, durationDays: 365, sort: 4, items: [{ name: '至尊卡礼包', quantity: 1 }] },
 ];
 
 const CONFIGS: Array<{ key: string; value: unknown; group: string; description: string }> = [
-  { key: 'bonus.reward_rate', value: 1.0, group: 'bonus', description: '直推奖比例（新购/升级）' },
-  { key: 'bonus.repurchase_rate', value: 0.1, group: 'bonus', description: '复消直推奖比例' },
+  { key: 'bonus.reward_rate', value: 1.0, group: 'bonus', description: '直推奖比例（新购/升级PV基数）' },
+  { key: 'bonus.repurchase_rate', value: 0.1, group: 'bonus', description: '复消直推奖比例（档位PV基数）' },
   { key: 'bonus.peer_rate', value: 1.0, group: 'bonus', description: '平级奖比例' },
   { key: 'bonus.leader_rate', value: 0.5, group: 'bonus', description: '领导奖比例' },
   { key: 'bonus.cash_ratio', value: 0.7, group: 'bonus', description: '奖金拆分到钱包比例' },
@@ -85,8 +85,8 @@ async function main() {
   for (const p of PACKAGES) {
     await prisma.package.upsert({
       where: { id: p.id },
-      create: { ...p, items: p.items as never, status: 1 },
-      update: { name: p.name, price: p.price, transferQuota: p.transferQuota, durationDays: p.durationDays, items: p.items as never, sort: p.sort },
+      create: { ...p, transferQuota: p.pv * 3n, items: p.items as never, status: 1 },
+      update: { name: p.name, price: p.price, transferQuota: p.pv * 3n, durationDays: p.durationDays, items: p.items as never, sort: p.sort },
     });
   }
   console.log(`  packages: ${PACKAGES.length}`);
@@ -138,7 +138,7 @@ async function main() {
   for (const p of products) {
     await prisma.product.upsert({
       where: { id: p.id },
-      create: p,
+      create: { ...p, pv: p.price },
       update: { ...p },
     });
     // 默认绑定全部四档

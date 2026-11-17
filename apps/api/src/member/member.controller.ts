@@ -1,8 +1,14 @@
 import { Body, Controller, Delete, Get, Headers, Param, Post, Put, Query } from '@nestjs/common';
 import QRCode from 'qrcode';
-import { DEFAULT_REFERRAL_POSTER_TEMPLATE, type ReferralPosterTemplate } from '@solar/shared';
+import {
+  DEFAULT_BRAND_SETTINGS,
+  DEFAULT_REFERRAL_POSTER_TEMPLATE,
+  type BrandSettings,
+  type ReferralPosterTemplate,
+} from '@solar/shared';
 import { BonusService } from '../bonus/bonus.service';
 import { CurrentUser, CurrentUserPayload } from '../auth/current-user.decorator';
+import { Public } from '../auth/public.decorator';
 import { Err } from '../common/business.exception';
 import { ConfigService } from '../config/config.service';
 import { EquityService } from '../equity/equity.service';
@@ -33,6 +39,13 @@ export class MemberController {
     private readonly config: ConfigService,
   ) {}
 
+  @Public()
+  @Get('brand')
+  async brand() {
+    const settings = await this.config.get<Partial<BrandSettings>>('brand.settings', DEFAULT_BRAND_SETTINGS);
+    return { ...DEFAULT_BRAND_SETTINGS, ...settings };
+  }
+
   @Get('packages')
   async packages(@CurrentUser() current: CurrentUserPayload) {
     const enabled = await Promise.all(['package.purchase', 'member.upgrade', 'member.repurchase']
@@ -49,7 +62,7 @@ export class MemberController {
             product: {
               select: {
                 id: true, name: true, subtitle: true, images: true,
-                price: true, originalPrice: true, stock: true,
+                price: true, pv: true, originalPrice: true, stock: true,
               },
             },
           },

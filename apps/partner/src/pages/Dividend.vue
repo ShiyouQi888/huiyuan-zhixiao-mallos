@@ -40,7 +40,7 @@ onMounted(async () => {
         <span class="rank-badge"><Coins :size="23" aria-hidden="true" /></span>
       </div>
       <div class="note-card">
-        池子 = <strong>全网当日业绩 × 该级比例</strong>，在该等级人数间平均分配。等级恰好等于该级才可参与，人数为 0 时不分配。
+        池子 = <strong>全网当日计酬PV × 该级比例</strong>，按 1 PV = ¥1 计算奖金基数后，在该等级人数间平均分配。等级恰好等于该级才可参与，人数为 0 时不分配。
       </div>
     </section>
 

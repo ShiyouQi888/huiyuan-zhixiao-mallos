@@ -18,8 +18,8 @@ interface FieldMeta {
 
 /** 五条收益线涉及的奖金参数，与后端 configs 表 bonus.* 一一对应 */
 const FIELDS: FieldMeta[] = [
-  { key: 'bonus.reward_rate', label: '直推奖比例', scope: '新购 / 升级', kind: 'percent', max: 100, hint: '被推者礼包价的百分比' },
-  { key: 'bonus.repurchase_rate', label: '复消直推奖比例', scope: '复消订单', kind: 'percent', max: 100, hint: '复消订单金额的百分比' },
+  { key: 'bonus.reward_rate', label: '直推奖比例', scope: '新购 / 升级', kind: 'percent', max: 100, hint: '按订单PV计算，1 PV = 1 元奖金基数' },
+  { key: 'bonus.repurchase_rate', label: '复消直推奖比例', scope: '复消订单', kind: 'percent', max: 100, hint: '按复消档位PV计算，1 PV = 1 元奖金基数' },
   { key: 'bonus.peer_rate', label: '平级奖比例', scope: '下级团队奖', kind: 'percent', max: 100, hint: '下级当日团队奖的百分比' },
   { key: 'bonus.leader_rate', label: '领导奖比例', scope: '下级团队奖', kind: 'percent', max: 100, hint: '下级当日团队奖的百分比' },
   { key: 'bonus.cash_ratio', label: '钱包分成比例', scope: '奖金拆分', kind: 'percent', max: 100, hint: '奖金进入钱包余额的比例' },
@@ -34,6 +34,8 @@ interface PackageDraft {
   id: number;
   name: string;
   level: number;
+  price: number;
+  pv: string;
   directRewardRate: string;
   repurchaseRewardRate: string;
   directReleaseDays: string;
@@ -92,6 +94,8 @@ export function BonusSettings() {
         id: Number(item.id),
         name: String(item.name ?? `档位 ${item.level}`),
         level: Number(item.level),
+        price: Number(item.price ?? 0),
+        pv: String(item.pv ?? item.price ?? 0),
         directRewardRate: item.directRewardRate == null ? '' : percentValue(item.directRewardRate),
         repurchaseRewardRate: item.repurchaseRewardRate == null ? '' : percentValue(item.repurchaseRewardRate),
         directReleaseDays: item.directReleaseDays == null ? '' : String(item.directReleaseDays),
@@ -150,7 +154,7 @@ export function BonusSettings() {
     }
   };
 
-  const updatePackageDraft = (id: number, key: keyof Pick<PackageDraft, 'directRewardRate' | 'repurchaseRewardRate' | 'directReleaseDays'>, value: string) => {
+  const updatePackageDraft = (id: number, key: keyof Pick<PackageDraft, 'pv' | 'directRewardRate' | 'repurchaseRewardRate' | 'directReleaseDays'>, value: string) => {
     setPackages((current) => current.map((item) => item.id === id ? { ...item, [key]: value } : item));
   };
 
@@ -164,7 +168,10 @@ export function BonusSettings() {
     let directRewardRate: number | null;
     let repurchaseRewardRate: number | null;
     let directReleaseDays: number | null;
+    let pv: number;
     try {
+      pv = Number(item.pv);
+      if (!Number.isSafeInteger(pv) || pv < 0) throw new Error(`${item.name}「档位PV」须为大于或等于 0 的整数`);
       directRewardRate = parsePercent(item.directRewardRate, '新购/升级直推比例');
       repurchaseRewardRate = parsePercent(item.repurchaseRewardRate, '复消直推比例');
       if (!item.directReleaseDays.trim()) {
@@ -182,17 +189,17 @@ export function BonusSettings() {
 
     const agreed = await confirm({
       title: `确认更新「${item.name}」奖励规则？`,
-      description: `新购 / 升级直推比例：${directRewardRate ?? globalDefaults.directRate}%；复消直推比例：${repurchaseRewardRate ?? globalDefaults.repurchaseRate}%；释放期数：${directReleaseDays ?? globalDefaults.releaseDays}。仅影响之后生成的奖励计划。`,
-      confirmText: '确认更新档位规则',
+      description: `档位PV：${pv.toLocaleString('zh-CN')}（1 PV = ¥1 奖金基数，标准权益通按PV × 3计算）；新购 / 升级直推比例：${directRewardRate ?? globalDefaults.directRate}%；复消直推比例：${repurchaseRewardRate ?? globalDefaults.repurchaseRate}%；释放期数：${directReleaseDays ?? globalDefaults.releaseDays}。仅影响新订单及之后生成的奖励计划。`,
+      confirmText: '确认更新档位设置',
       tone: 'danger',
-      confirmationText: `更新档位奖励规则 ${item.name}`,
+      confirmationText: `更新档位PV与奖励规则 ${item.name}`,
     });
     if (!agreed) return;
 
     setSavingPackage(item.id);
     try {
-      await put(`/admin/packages/${item.id}`, { directRewardRate, repurchaseRewardRate, directReleaseDays });
-      setToast(`${item.name}奖励参数已保存，新订单生效`);
+      await put(`/admin/packages/${item.id}`, { pv, directRewardRate, repurchaseRewardRate, directReleaseDays });
+      setToast(`${item.name} PV 与奖励参数已保存，新订单生效`);
       await load();
     } catch (e) {
       setToast(e instanceof Error ? e.message : '档位奖励参数保存失败');
@@ -247,7 +254,7 @@ export function BonusSettings() {
               <div className="min-w-0">
                 <div className="text-sm font-medium text-ink">启用最大推广线剔除</div>
                 <p className="mb-0 mt-1 max-w-3xl text-xs leading-relaxed text-ink-faint">
-                  每位会员独立判断自己的直属推广线，至少有两条直属会员线时，剔除当日业绩最大的一条及其团队奖基数；该条直接关系不产生领导奖和平级奖，推广线内部会员仍按各自规则结算。
+                  每位会员独立判断自己的直属推广线，至少有两条直属会员线时，剔除当日团队PV最大的一条及其团队奖基数；该条直接关系不产生领导奖和平级奖，推广线内部会员仍按各自规则结算。
                 </p>
               </div>
               <button
@@ -275,22 +282,23 @@ export function BonusSettings() {
 
       <Card>
         <CardHeader
-          title="按会员档位配置直推奖励"
-          description="留空时继承上方全局参数；档位设置仅用于之后生成的奖励计划，不会改动已生成计划。"
+          title="按会员档位配置 PV 与直推奖励"
+          description="档位PV独立于售价，用于业绩归集、奖金基数和权益通计算（PV × 3）；直推比例留空时继承全局设置，只影响新订单。"
           icon={<Package size={15} />}
         />
         {loading ? (
-          <TableSkeleton rows={4} cols={5} />
+          <TableSkeleton rows={4} cols={6} />
         ) : error ? (
           <ErrorBlock text={`档位加载失败：${error}`} action={<Button size="sm" onClick={() => void load()}>重试</Button>} />
         ) : packages.length === 0 ? (
           <div className="px-4 py-10 text-center text-sm text-ink-faint">当前没有可配置的会员档位</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-sm">
+            <table className="w-full min-w-[1040px] text-left text-sm">
               <thead className="border-b border-line bg-surface-muted text-xs text-ink-faint">
                 <tr>
                   <th className="px-4 py-3 font-medium">会员档位</th>
+                  <th className="px-4 py-3 font-medium">档位 PV</th>
                   <th className="px-4 py-3 font-medium">新购 / 升级直推比例</th>
                   <th className="px-4 py-3 font-medium">复消直推比例</th>
                   <th className="px-4 py-3 font-medium">释放天数</th>
@@ -302,7 +310,14 @@ export function BonusSettings() {
                   <tr key={item.id}>
                     <td className="px-4 py-3">
                       <div className="font-medium text-ink">{item.name}</div>
-                      <div className="mt-0.5 text-xs text-ink-faint">档位 {item.level}</div>
+                      <div className="mt-0.5 text-xs text-ink-faint">档位 {item.level} · 售价 ¥{item.price.toLocaleString('zh-CN')}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="relative max-w-36">
+                        <input className="input pr-8" type="number" min={0} step={1} value={item.pv} onChange={(event) => updatePackageDraft(item.id, 'pv', event.target.value)} aria-label={`${item.name}档位PV`} />
+                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-2xs text-ink-faint">PV</span>
+                      </div>
+                      <div className="mt-1 text-2xs text-ink-faint">1 PV = ¥1 奖金基数</div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="relative max-w-44">
@@ -337,7 +352,7 @@ export function BonusSettings() {
           </div>
         )}
         <div className="border-t border-line px-4 py-2.5 text-xs leading-5 text-ink-faint">
-          例如：档位直推比例 100% 表示按对应订单金额计算全额直推奖；释放天数决定该奖励计划拆分释放的期数。
+          例如：档位 PV 为 2,000、直推比例为 70%，奖励总额为 ¥1,400。升级计酬PV按目标档位 PV 减当前档位 PV 计算；订单售价、钱包扣款和权益通仍按人民币金额处理。
         </div>
       </Card>
 

@@ -128,11 +128,13 @@ export class FinanceDashboardService {
     const quotaBizNames: Record<string, string> = {
       package_1: '档位发放', package_2: '档位升级', package_3: '档位复消',
       wallet_transfer_quota_reserve: '转出预占', wallet_transfer_quota_release: '预占返还',
-      wallet_transfer_quota_consume: '转出确认', wallet_product_spend: '商城消费',
+      wallet_transfer_quota_consume: '转出确认', wallet_product_spend: '商城消费（旧规则）',
+      wallet_product_spend_reversal: '商城额度规则修订返还',
+      product_repurchase: '商品订单PV × 3发放',
       admin_manual_adjust: '后台额度调整', manual_rank_adjustment: '调级新增',
     };
     const bonusNames: Record<number, string> = { 1: '直推奖', 2: '团队奖', 3: '平级奖', 4: '领导奖', 5: '分红', 6: '人工调整' };
-    const orderStatusNames: Record<number, string> = { 0: '待支付', 1: '待交付', 2: '已交付', 3: '已完成' };
+    const orderStatusNames: Record<number, string> = { 0: '待支付', 1: '已支付待发货', 2: '已发货', 3: '已完成' };
     const orderTypeNames: Record<number, string> = { 1: '档位新购', 2: '档位升级', 3: '档位复消', 4: '商城商品' };
     const walletByType = walletFlowByType.map((row) => ({
       type: row.type, name: walletTypeNames[row.type] ?? `类型 ${row.type}`,

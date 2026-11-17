@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { Sun } from 'lucide-vue-next';
+import { useBrandStore } from '../stores/brand';
+import { resolveAssetUrl } from '../api';
+import BrandFooter from './BrandFooter.vue';
+
+const brand = useBrandStore();
 
 defineProps<{
   title: string;
@@ -10,8 +15,11 @@ defineProps<{
 <template>
   <main class="page auth-page">
     <header class="auth-brand">
-      <div class="brand-mark"><Sun :size="27" stroke-width="1.7" aria-hidden="true" /></div>
-      <div class="auth-eyebrow">SOLAR MEMBER</div>
+      <div class="brand-mark">
+        <img v-if="brand.settings.logoUrl" :src="resolveAssetUrl(brand.settings.logoUrl)" :alt="brand.settings.brandName" />
+        <Sun v-else :size="27" stroke-width="1.7" aria-hidden="true" />
+      </div>
+      <div class="auth-eyebrow">{{ brand.settings.storeName }}</div>
       <h1>{{ title }}</h1>
       <p>{{ description }}</p>
       <div class="auth-benefits" aria-label="会员商城服务">
@@ -25,7 +33,7 @@ defineProps<{
       <slot />
     </section>
 
-    <footer class="auth-footer">太阳线会员服务 · H5 会员商城</footer>
+    <BrandFooter class="auth-footer" />
   </main>
 </template>
 
@@ -42,6 +50,7 @@ defineProps<{
 }
 .auth-brand { margin: 0 0 22px; text-align: center; }
 .auth-brand .brand-mark { width: 58px; height: 58px; border-radius: 18px; }
+.auth-brand .brand-mark img { width: 100%; height: 100%; border-radius: inherit; object-fit: contain; padding: 5px; }
 .auth-eyebrow { margin-top: 13px; color: var(--brand); font-size: 9px; font-weight: 750; letter-spacing: .2em; }
 .auth-brand h1 { margin: 6px 0 0; color: var(--text); font-size: 25px; font-weight: 800; letter-spacing: -.035em; }
 .auth-brand p { max-width: 275px; margin: 7px auto 0; color: var(--muted); font-size: 11.5px; line-height: 1.65; }
@@ -55,7 +64,7 @@ defineProps<{
   font-size: 9.5px;
 }
 .auth-card { padding: 19px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-float); }
-.auth-footer { margin-top: 17px; color: var(--muted); font-size: 9.5px; text-align: center; }
+:deep(.brand-legal-footer) { margin-top: 17px; padding: 0 4px; border: 0; background: transparent; }
 :deep(.auth-field) { display: grid; gap: 7px; margin-bottom: 13px; color: var(--muted); font-size: 11px; font-weight: 600; }
 :deep(.auth-field > span) { color: var(--text-2); }
 :deep(.auth-field .t-input) { min-height: 46px; }

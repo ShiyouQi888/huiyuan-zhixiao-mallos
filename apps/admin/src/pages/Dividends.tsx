@@ -68,7 +68,7 @@ export function Dividends() {
         <Card className="overflow-hidden">
           <CardHeader
             title="分红池快照"
-            description="各等级当日业绩、池金额与人均分红（来自每日结算快照）"
+            description="各等级当日计酬PV、池金额与人均分红（PV按1:1换算为奖金基数）"
             icon={<HandCoins size={15} />}
           />
           {loading ? (
@@ -83,7 +83,7 @@ export function Dividends() {
                     <th className="th">结算日</th>
                     <th className="th">等级</th>
                     <th className="th text-center">人数</th>
-                    <th className="th text-right">总业绩</th>
+                    <th className="th text-right">总计酬 PV</th>
                     <th className="th text-right">池金额</th>
                     <th className="th text-right">人均分红</th>
                   </tr>
@@ -94,7 +94,7 @@ export function Dividends() {
                       <td className="td whitespace-nowrap text-xs text-ink-muted">{fmtDate(pool.statDate)}</td>
                       <td className="td"><Badge tone="brand">{pool.rank?.name ?? rankNames[Number(pool.rankId)] ?? `Lv.${pool.rankId}`}</Badge></td>
                       <td className="td num text-center">{pool.userCount}</td>
-                      <td className="td num text-right">{fmtMoney(pool.totalPerformance)}</td>
+                      <td className="td num text-right text-accent-ink">{Number(pool.totalPerformance).toLocaleString('zh-CN')} PV</td>
                       <td className="td num text-right text-accent-ink">{fmtMoney(pool.poolAmount)}</td>
                       <td className="td num text-right">{fmtMoney(pool.perCapita)}</td>
                     </tr>

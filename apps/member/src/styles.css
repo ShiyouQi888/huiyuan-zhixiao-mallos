@@ -951,6 +951,7 @@ a:focus-visible,
   color: var(--muted);
   font-size: 10px;
 }
+.product-card-pv { color: var(--text-2); font-family: var(--font-num); font-size: 9px; font-weight: 650; }
 .product-card-stock--empty { color: var(--danger); }
 .product-card-stock--low { color: var(--brand); }
 
@@ -1444,7 +1445,7 @@ a:focus-visible,
 }
 .detail-facts {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 .detail-facts div {

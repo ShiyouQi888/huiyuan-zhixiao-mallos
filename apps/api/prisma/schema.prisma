@@ -1,7 +1,7 @@
 // 太阳线会员系统 · 数据模型
 // 口径来源：docs/太阳线会员系统-完整架构文档.md
 // 金额统一以「元」为单位的整数存储在 BIGINT 中。
-// 系统不接外部提现渠道；权益通按档位发放，约束钱包转出并随商城钱包消费递减。
+// 系统不接外部提现渠道；权益通按档位发放，仅约束会员间钱包转出。
 
 generator client {
   provider = "prisma-client-js"
@@ -149,6 +149,9 @@ model Package {
   name         String   @db.VarChar(64)
   level        Int      @unique
   price        BigInt
+  /// 档位PV；奖金与业绩基数按 1 PV = 1 元计算
+  pv           BigInt   @default(0)
+  /// 标准权益通值，按档位PV × 3派生；账户发放额以支付成功时的PV快照计算
   transferQuota BigInt
   durationDays Int      @default(365)
   /// 为空时继承全局 bonus.reward_rate；以比例存储，如 1.0 = 100%
@@ -198,6 +201,8 @@ model Product {
   /// 详情图 URL 数组
   details      Json     @default("[]")
   price        BigInt
+  /// 商品PV，按件计入业绩
+  pv           BigInt   @default(0)
   /// 划线价
   originalPrice BigInt  @default(0)
   stock        Int      @default(0)
@@ -265,11 +270,15 @@ model Order {
   packageId        Int?
   fromPackageId    Int?
   amount           BigInt
+  /// 下单时锁定的计酬PV总量；历史订单迁移时沿用原订单金额
+  pvAmount         BigInt   @default(0)
   equityDeduct     BigInt    @default(0)
   balanceDeduct    BigInt    @default(0)
   cashPay          BigInt    @default(0)
   /// 下单时的收货地址快照，地址簿变更不影响历史订单
   shippingAddress  Json?
+  shippingCarrier  String?   @db.VarChar(64)
+  trackingNo       String?   @db.VarChar(128)
   /// 0 CREATED 1 PAID 2 DELIVERED 3 COMPLETED
   status           Int       @default(0) @db.SmallInt
   /// 下单时推荐人快照
@@ -277,6 +286,8 @@ model Order {
   remark           String?   @db.VarChar(512)
   createdAt        DateTime  @default(now())
   paidAt           DateTime?
+  /// 支付成功时完成业绩、权益通与直推计划登记；与后续交付状态独立
+  businessEffectsAppliedAt DateTime?
   deliveredAt      DateTime?
   finishedAt       DateTime?
 
@@ -297,6 +308,8 @@ model OrderItem {
   productId BigInt?
   name      String   @db.VarChar(128)
   price     BigInt
+  /// 下单时锁定的单件PV
+  pv        BigInt   @default(0)
   quantity  Int      @default(1)
   amount    BigInt
 
@@ -310,7 +323,7 @@ model OrderPerformance {
   id        BigInt   @id @default(autoincrement())
   orderId   BigInt   @unique
   userId    BigInt
-  /// 计入业绩的金额 = orders.amount（全额）
+  /// 计酬基数：新订单读取 orders.pvAmount；切换前的历史记录保持原金额数值
   amount    BigInt
   occurDate DateTime @db.Date
   createdAt DateTime @default(now())
@@ -422,7 +435,7 @@ model TransferQuotaAccount {
 model TransferQuotaTransaction {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt
-  /// 1 档位发放 2 转账预占 3 拒绝/超时返还 4 钱包转出确认 5 人工调整 6 商城钱包消费
+  /// 1 档位发放 2 转账预占 3 拒绝/超时返还 4 钱包转出确认 5 人工调整 6 历史规则商城钱包消费（已停用）
   type         Int      @db.SmallInt
   changeAmount BigInt
   balanceAfter BigInt
@@ -526,7 +539,7 @@ model Rank {
   id          Int      @id @default(autoincrement())
   name        String   @db.VarChar(64)
   level       Int      @unique
-  /// 团队累计业绩门槛（元）
+  /// 团队累计业绩门槛（PV；1 PV = 1 元奖金基数）
   threshold   BigInt
   /// 手工晋升到此等级时新增的权益通额度（元）
   transferQuotaGrant BigInt @default(0)

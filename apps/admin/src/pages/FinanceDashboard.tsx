@@ -32,7 +32,13 @@ function ChartTooltip({ active, payload, label }: any) {
         {payload.filter((item: any) => item.value !== undefined).map((item: any) => (
           <div key={item.dataKey} className="flex items-center justify-between gap-5">
             <span className="flex items-center gap-1.5 text-ink-muted"><i className="h-1.5 w-1.5 rounded-full" style={{ background: item.color }} />{item.name}</span>
-            <strong className="num font-medium text-ink">{item.dataKey === 'newMembers' ? `${Number(item.value).toLocaleString('zh-CN')} 人` : fmtMoney(item.value)}</strong>
+            <strong className="num font-medium text-ink">
+              {item.dataKey === 'newMembers'
+                ? `${Number(item.value).toLocaleString('zh-CN')} 人`
+                : item.dataKey === 'performance'
+                  ? `${Number(item.value).toLocaleString('zh-CN')} PV`
+                  : fmtMoney(item.value)}
+            </strong>
           </div>
         ))}
       </div>
@@ -145,7 +151,7 @@ export function FinanceDashboard() {
     <>
       <PageHeader
         title="财务大盘"
-        description="会员钱包、权益通、太阳值、订单与会员经营数据；金额单位为元，太阳值为平台内部记账资产，暂未接入外部收款或提现渠道。"
+        description="会员钱包、权益通、太阳值、订单与会员经营数据；金额单位为元，计酬业绩按PV统计（1 PV = ¥1 奖金基数）。"
         meta={<Badge tone="info" dot>内部账务 · 不含外部提现</Badge>}
         action={actions}
       />
@@ -156,7 +162,7 @@ export function FinanceDashboard() {
       <div className={`grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 ${loading ? 'opacity-60 transition-opacity' : ''}`}>
         <StatCard label="会员钱包账面余额" value={fmtMoney(data.wallet.balance)} icon={<Wallet size={17} />} accent="success" trend={`${Number(data.wallet.accounts).toLocaleString('zh-CN')} 个账户 · 含冻结金额`} />
         <StatCard label="钱包可用余额" value={fmtMoney(data.wallet.available)} icon={<CreditCard size={17} />} accent="brand" trend={`冻结 ${fmtMoney(data.wallet.frozen)}`} />
-        <StatCard label="权益通可用总额" value={fmtMoney(data.transferQuota.available)} icon={<BadgeDollarSign size={17} />} accent="info" trend={`已发放 ${fmtMoney(data.transferQuota.granted)} · 已用 ${fmtMoney(data.transferQuota.used)}`} />
+        <StatCard label="权益通可用总额" value={fmtMoney(data.transferQuota.available)} icon={<BadgeDollarSign size={17} />} accent="info" trend={`已发放 ${fmtMoney(data.transferQuota.granted)} · 转出已用 ${fmtMoney(data.transferQuota.used)}`} />
         <StatCard label="太阳值流通余额" value={fmtMoney(data.sunValue.circulating)} icon={<Coins size={17} />} accent="amber" trend={`累计发放 ${fmtMoney(data.sunValue.issued)}`} />
         <StatCard label={`近 ${days} 天已支付订单额`} value={fmtMoney(data.orders.period.paidAmount)} icon={<ShoppingBag size={17} />} accent="warning" trend={`${Number(data.orders.period.count).toLocaleString('zh-CN')} 笔新建订单 · 含待支付`} />
         <StatCard label={`近 ${days} 天奖金记账`} value={fmtMoney(data.bonuses.period.amount)} icon={<TrendingUp size={17} />} accent="danger" trend={`待释放 ${fmtMoney(data.bonuses.pendingRelease.amount)}`} />
@@ -190,15 +196,15 @@ export function FinanceDashboard() {
           <div className="grid grid-cols-2 gap-3 px-4 pb-4">
             <LedgerMetric label="累计发放" value={data.transferQuota.granted} />
             <LedgerMetric label="剩余可用" value={data.transferQuota.available} tone="text-info" />
-            <LedgerMetric label="累计消耗" value={data.transferQuota.used} />
+            <LedgerMetric label="转出已用" value={data.transferQuota.used} />
             <LedgerMetric label="待确认预占" value={data.transferQuota.reserved} tone="text-warning" />
             <LedgerMetric label="后台调减" value={data.transferQuota.adjustedOut} />
             <LedgerMetric label="额度账户" value={data.transferQuota.accounts} isCount />
           </div>
           <div className="mx-4 mb-4 grid grid-cols-2 gap-3 rounded-lg border border-line bg-raised/50 p-3">
             <div><span className="text-2xs text-ink-faint">权益通用尽账户</span><div className="num mt-1 text-lg font-semibold text-warning">{Number(data.transferQuota.exhaustedAccounts).toLocaleString('zh-CN')} <small className="text-xs font-normal text-ink-faint">个</small></div></div>
-            <div><span className="text-2xs text-ink-faint">历史超额消耗</span><div className="num mt-1 text-lg font-semibold text-danger">{fmtMoney(data.transferQuota.overage)}</div></div>
-            <div className="col-span-2 border-t border-line pt-2 text-2xs leading-5 text-ink-faint">权益通是会员转出及商城钱包消费的业务额度，不是钱包余额或可提现金额；超额历史记录会单独展示。</div>
+            <div><span className="text-2xs text-ink-faint">钱包转出超额</span><div className="num mt-1 text-lg font-semibold text-danger">{fmtMoney(data.transferQuota.overage)}</div></div>
+            <div className="col-span-2 border-t border-line pt-2 text-2xs leading-5 text-ink-faint">权益通仅约束会员钱包转出，不是钱包余额或可提现金额；商城消费不扣减权益通。</div>
           </div>
         </Card>
 
@@ -220,7 +226,7 @@ export function FinanceDashboard() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-12">
         <Card className="xl:col-span-8">
-          <CardHeader title="资金与经营趋势" description={`近 ${days} 天每日汇总，包含钱包账务、订单、奖金与计酬业绩`} icon={<Activity size={15} />} />
+          <CardHeader title="资金与经营趋势" description={`近 ${days} 天每日汇总；金额以元计，计酬业绩以PV计（1 PV = ¥1 奖金基数）`} icon={<Activity size={15} />} />
           {trend.length ? (
             <div className="h-[310px] px-3 pb-4 pt-3">
               <ResponsiveContainer width="100%" height="100%">
@@ -234,7 +240,7 @@ export function FinanceDashboard() {
                   <Bar dataKey="walletIn" name="钱包入账" fill="var(--success-solid)" opacity={0.78} radius={[3, 3, 0, 0]} maxBarSize={14} />
                   <Bar dataKey="walletOut" name="钱包扣减" fill="var(--warning-solid)" opacity={0.72} radius={[3, 3, 0, 0]} maxBarSize={14} />
                   <Bar dataKey="bonusAmount" name="奖金记账" fill="var(--info-solid)" opacity={0.78} radius={[3, 3, 0, 0]} maxBarSize={14} />
-                  <Area type="monotone" dataKey="performance" name="计酬业绩" stroke="#a78bfa" fill="transparent" strokeDasharray="5 4" strokeWidth={1.5} />
+                  <Area type="monotone" dataKey="performance" name="计酬PV" stroke="#a78bfa" fill="transparent" strokeDasharray="5 4" strokeWidth={1.5} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -335,7 +341,7 @@ export function FinanceDashboard() {
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-2xs text-ink-faint">
         <span className="flex items-center gap-2"><ShieldCheck size={14} />平台财务数据仅反映系统内部账本，不等同银行存款、外部清算或提现数据。</span>
-        <span>订单已支付口径包含待交付、已交付和已完成；未支付订单不计入已支付订单额。</span>
+        <span>已支付订单口径包含待发货、已发货和已完成；未支付订单不计入已支付订单额。</span>
       </div>
     </>
   );

@@ -4,7 +4,7 @@ import { api, money, post } from '../api';
 import { Toast } from './_toast';
 import PageHeading from '../components/PageHeading.vue';
 import EmptyState from '../components/EmptyState.vue';
-import { BadgeCheck, ClipboardList, Clock3, MapPin, Package, RefreshCw, Truck } from 'lucide-vue-next';
+import { BadgeCheck, ClipboardList, Clock3, Copy, MapPin, Package, RefreshCw, Truck } from 'lucide-vue-next';
 
 type OrderFilter = 'all' | 'pending' | 'shipping' | 'completed';
 const orders = ref<any[]>([]);
@@ -31,7 +31,7 @@ const visibleOrders = computed(() => orders.value.filter((order) => {
 }));
 
 function statusText(status: number) {
-  return ({ 0: '待支付', 1: '待后台交付', 2: '待确认收货', 3: '已完成' } as Record<number, string>)[status] ?? '处理中';
+  return ({ 0: '待支付', 1: '已支付 · 待发货', 2: '已发货 · 待收货', 3: '已完成' } as Record<number, string>)[status] ?? '处理中';
 }
 function statusIcon(status: number) {
   return status === 2 ? Truck : status === 3 ? BadgeCheck : status === 0 || status === 1 ? Clock3 : Package;
@@ -41,6 +41,15 @@ function orderTitle(order: any) {
 }
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+
+async function copyTrackingNo(trackingNo: string) {
+  try {
+    await navigator.clipboard.writeText(trackingNo);
+    Toast('快递单号已复制', 'success');
+  } catch {
+    Toast('复制失败，请长按单号复制', 'warning');
+  }
 }
 
 async function load() {
@@ -79,7 +88,7 @@ async function confirmReceipt(order: any) {
   confirmingNo.value = order.orderNo;
   try {
     await post(`/orders/${order.orderNo}/confirm`);
-    Toast('已确认收货，订单完成', 'success');
+    Toast('已确认收货', 'success');
     await load();
   } catch (e: any) {
     Toast(e.message ?? '操作失败，请稍后重试', 'danger');
@@ -128,10 +137,11 @@ onMounted(load);
           <div class="order-item-icon"><Package :size="21" stroke-width="1.7" aria-hidden="true" /></div>
           <div class="order-item-copy">
             <strong>{{ orderTitle(order) }}</strong>
+            <span v-if="order.type === 4 && order.isRepurchase" class="order-repurchase-tag">支付成功后按PV × 3计入权益通</span>
             <span v-if="order.items?.[0]">数量 {{ order.items[0].quantity ?? 1 }}</span>
             <span v-else>{{ ({ 1: '会员新购', 2: '会员升级', 3: '会员复购', 4: '商品消费' } as Record<number, string>)[order.type] ?? '会员订单' }}</span>
           </div>
-          <div class="order-total"><small>订单金额</small><strong>¥{{ money(order.amount) }}</strong></div>
+          <div class="order-total"><small>订单金额</small><strong>¥{{ money(order.amount) }}</strong><small>计酬 {{ Number(order.pvAmount ?? order.amount).toLocaleString('zh-CN') }} PV</small></div>
         </div>
 
         <div class="order-payment">
@@ -143,9 +153,20 @@ onMounted(load);
           <MapPin :size="14" aria-hidden="true" />
           <div><strong>{{ order.shippingAddress.receiver }} · {{ order.shippingAddress.phone }}</strong><span>{{ order.shippingAddress.province }}{{ order.shippingAddress.city }}{{ order.shippingAddress.district }}{{ order.shippingAddress.detail }}</span></div>
         </div>
+        <div v-if="order.trackingNo" class="order-tracking">
+          <div class="order-tracking-icon"><Truck :size="15" aria-hidden="true" /></div>
+          <div class="order-tracking-info">
+            <strong>物流信息</strong>
+            <span>{{ order.shippingCarrier || '快递' }} · {{ order.trackingNo }}</span>
+            <small v-if="order.deliveredAt">发货时间 {{ formatDate(order.deliveredAt) }}</small>
+          </div>
+          <button type="button" class="tracking-copy" aria-label="复制快递单号" @click="copyTrackingNo(order.trackingNo)">
+            <Copy :size="14" aria-hidden="true" />复制
+          </button>
+        </div>
         <footer class="order-card-foot">
           <span v-if="order.status === 3" class="order-complete-note"><BadgeCheck :size="14" aria-hidden="true" /> 订单已完成</span>
-          <span v-else class="order-foot-hint">{{ order.status === 2 ? '商品已交付，请确认收货' : order.status === 1 ? '订单已提交，等待后台交付' : '请完成支付后等待订单处理' }}</span>
+          <span v-else class="order-foot-hint">{{ order.status === 2 ? '商品已发货，请根据快递信息留意签收' : order.status === 1 ? '支付成功，业绩与奖励已按订单登记，等待发货' : '请完成支付后等待订单处理' }}</span>
           <t-button v-if="order.status === 2" theme="primary" size="small" :loading="confirmingNo === order.orderNo"
             @click="confirmReceipt(order)">确认收货</t-button>
         </footer>
@@ -213,6 +234,7 @@ onMounted(load);
 .order-item-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 5px; }
 .order-item-copy strong { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .order-item-copy span, .order-total small { color: var(--muted); font-size: 10px; }
+.order-item-copy .order-repurchase-tag { width: fit-content; padding: 3px 6px; border-radius: 5px; background: var(--brand-soft); color: var(--brand); font-size: 9px; font-weight: 650; }
 .order-total { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 4px; }
 .order-total strong { color: var(--text); font-family: var(--font-num); font-size: 13px; }
 .order-payment { display: flex; flex-wrap: wrap; gap: 5px 12px; padding: 10px 0; color: var(--muted); font-size: 10px; }
@@ -222,6 +244,14 @@ onMounted(load);
 .order-shipping-address div { display: grid; min-width: 0; gap: 4px; }
 .order-shipping-address strong { color: var(--text-2); font-size: 10.5px; font-weight: 600; }
 .order-shipping-address span { color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.order-tracking { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 11px 10px; border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.order-tracking-icon { display: grid; width: 31px; height: 31px; flex: 0 0 auto; place-items: center; border-radius: 9px; background: var(--brand-soft); color: var(--brand); }
+.order-tracking-info { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.order-tracking-info strong { color: var(--text); font-size: 10.5px; font-weight: 650; }
+.order-tracking-info span { overflow: hidden; color: var(--text-2); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.order-tracking-info small { color: var(--muted); font-size: 9px; }
+.tracking-copy { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--brand); font: inherit; font-size: 10px; font-weight: 600; cursor: pointer; }
+.tracking-copy:focus-visible { outline: 2px solid color-mix(in srgb, var(--brand) 65%, transparent); outline-offset: 2px; }
 .order-card-foot { min-height: 32px; border-top: 1px solid var(--line); padding-top: 10px; }
 .order-foot-hint, .order-complete-note { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .order-complete-note { color: var(--green); }

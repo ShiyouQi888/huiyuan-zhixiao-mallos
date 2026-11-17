@@ -41,8 +41,14 @@ const LEDGER_TYPE: Record<number, string> = {
   1: '奖金入账', 2: '消费扣款', 3: '转出', 4: '转入', 5: '人工调整', 6: '转账退回',
 };
 const QUOTA_LEDGER_TYPE: Record<number, string> = {
-  1: '权益通发放', 2: '转账预占', 3: '权益通返还', 4: '转账确认', 5: '权益通调整', 6: '商城消费',
+  1: '权益通发放', 2: '转账预占', 3: '权益通返还', 4: '转账确认', 5: '权益通调整', 6: '商城消费（旧规则）',
 };
+function quotaLedgerLabel(row: any) {
+  if (row.bizType === 'wallet_product_spend_reversal') return '规则修订返还';
+  if (row.bizType === 'wallet_product_spend') return '商城消费（旧规则）';
+  if (row.bizType === 'product_repurchase') return '商品订单 PV × 3 发放';
+  return QUOTA_LEDGER_TYPE[row.type] ?? row.bizType;
+}
 
 export function Assets() {
   const [tab, setTab] = useState<AssetTab>(() => {
@@ -505,7 +511,7 @@ export function Assets() {
         {quotaLedgerLoading ? (
           <TableSkeleton rows={6} cols={6} />
         ) : quotaLedger.length === 0 ? (
-          <Empty text="暂无权益通变动" description="历史档位订单、钱包转出与商城消费已回算到账户；流水从权益通规则启用后开始记录。" />
+          <Empty text="暂无权益通变动" description="礼包及会员商品订单按PV发放；钱包转出计入权益通已用额度。" />
         ) : (
           <Card className="overflow-hidden">
             <div className="table-wrap">
@@ -519,7 +525,7 @@ export function Assets() {
               <tbody>
                 {quotaLedger.map((row) => (
                   <tr key={row.id} className="admin-row">
-                    <td className="td"><Badge tone={Number(row.changeAmount) >= 0 ? 'success' : 'warning'}>{QUOTA_LEDGER_TYPE[row.type] ?? row.bizType}</Badge></td>
+                    <td className="td"><Badge tone={Number(row.changeAmount) >= 0 ? 'success' : 'warning'}>{quotaLedgerLabel(row)}</Badge></td>
                     <td className={`td num text-right font-medium ${Number(row.changeAmount) >= 0 ? 'text-success' : 'text-danger'}`}>{row.type === 4 ? '—' : `${Number(row.changeAmount) > 0 ? '+' : ''}${fmtMoney(row.changeAmount)}`}</td>
                     <td className="td num text-right">{fmtMoney(row.balanceAfter)}</td>
                     <td className="td mono text-xs text-ink-muted">{row.bizId}</td>

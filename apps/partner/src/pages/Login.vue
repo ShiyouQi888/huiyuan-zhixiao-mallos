@@ -3,6 +3,9 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api';
 import { useFeaturesStore } from '../stores/features';
+import { useBrandStore } from '../stores/brand';
+import { resolveAssetUrl } from '../api';
+import BrandFooter from '../components/BrandFooter.vue';
 import ThemeToggle from '../components/ThemeToggle.vue';
 import { AlertCircle, Crown } from 'lucide-vue-next';
 
@@ -12,6 +15,7 @@ const error = ref('');
 const loading = ref(false);
 const router = useRouter();
 const features = useFeaturesStore();
+const brand = useBrandStore();
 
 async function submit() {
   loading.value = true;
@@ -35,8 +39,11 @@ async function submit() {
     <div class="auth-theme"><ThemeToggle /></div>
 
     <header class="auth-brand">
-      <div class="brand-mark"><Crown :size="27" :stroke-width="1.7" aria-hidden="true" /></div>
-      <div class="auth-eyebrow">SOLAR PARTNER</div>
+      <div class="brand-mark">
+        <img v-if="brand.settings.logoUrl" :src="resolveAssetUrl(brand.settings.logoUrl)" :alt="brand.settings.brandName" />
+        <Crown v-else :size="27" :stroke-width="1.7" aria-hidden="true" />
+      </div>
+      <div class="auth-eyebrow">{{ brand.settings.storeName }}</div>
       <h1>合伙人中心</h1>
       <p>等级、团队、收益与分红，一处集中管理</p>
       <div class="auth-benefits" aria-label="合伙人服务">
@@ -67,6 +74,6 @@ async function submit() {
       <p class="auth-hint">需达到业务主任等级（Lv.1）方可进入</p>
     </section>
 
-    <footer class="auth-footer">太阳线合伙人服务 · H5 合伙人中心</footer>
+    <BrandFooter class="auth-footer" />
   </main>
 </template>

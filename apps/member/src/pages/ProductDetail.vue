@@ -6,7 +6,7 @@ import { useUserStore } from '../stores/user';
 import { Toast } from './_toast';
 import EmptyState from '../components/EmptyState.vue';
 import AppModal from '../components/AppModal.vue';
-import { BadgeCheck, ChevronLeft, CircleDollarSign, Minus, Package, Plus, Tags, Wallet } from 'lucide-vue-next';
+import { BadgeCheck, ChevronLeft, CircleDollarSign, Minus, Package, Plus, Tags, TrendingUp, Wallet } from 'lucide-vue-next';
 
 const route = useRoute();
 const router = useRouter();
@@ -24,15 +24,15 @@ const images = computed(() => (product.value?.images ?? []).filter(Boolean));
 const selectedImage = computed(() => images.value[selectedImageIndex.value] ?? '');
 const unitPrice = computed(() => Number(product.value?.effectivePrice ?? product.value?.price ?? 0));
 const totalPrice = computed(() => unitPrice.value * quantity.value);
+const unitPv = computed(() => Math.max(0, Number(product.value?.pv ?? 0)));
+const totalPv = computed(() => unitPv.value * quantity.value);
+const isProductRepurchase = computed(() => Boolean(store.profile?.packageId));
+const repurchaseQuota = computed(() => isProductRepurchase.value ? totalPv.value * 3 : 0);
 const comparePrice = computed(() => Number(product.value?.originalPrice ?? product.value?.price ?? 0));
 const stock = computed(() => Math.max(0, Number(product.value?.stock ?? 0)));
 const canBuy = computed(() => stock.value > 0 && quantity.value <= stock.value && !buying.value);
 const hasMemberPrice = computed(() => Boolean(product.value) && unitPrice.value < Number(product.value?.price ?? 0));
 const selectedAddress = computed(() => addresses.value.find((address) => String(address.id) === selectedAddressId.value) ?? null);
-const availableQuota = computed(() => Math.max(0, Number(store.profile?.transferQuotaAccount?.available ?? 0)));
-const quotaSpend = computed(() => totalPrice.value);
-const quotaAfterSpend = computed(() => Math.max(0, availableQuota.value - quotaSpend.value));
-const quotaExceedsAvailable = computed(() => Boolean(store.profile?.packageId) && quotaSpend.value > availableQuota.value);
 
 onMounted(async () => {
   loading.value = true;
@@ -129,6 +129,15 @@ async function buy() {
         <h1 class="detail-title">{{ product.name }}</h1>
         <p v-if="product.subtitle" class="detail-subtitle">{{ product.subtitle }}</p>
 
+        <div class="detail-pv-highlight" aria-label="商品计酬PV">
+          <span class="detail-pv-highlight__icon"><TrendingUp :size="17" aria-hidden="true" /></span>
+          <span class="detail-pv-highlight__copy">
+            <small>商品计酬 PV</small>
+            <strong>{{ unitPv.toLocaleString('zh-CN') }}<span> PV / 件</span></strong>
+          </span>
+          <span class="detail-pv-highlight__hint">按购买数量累计</span>
+        </div>
+
         <div class="detail-tags">
           <span v-if="hasMemberPrice" class="detail-tag"><BadgeCheck :size="12" aria-hidden="true" />会员专享价</span>
           <span v-if="product.category?.name" class="detail-tag"><Tags :size="12" aria-hidden="true" />{{ product.category.name }}</span>
@@ -148,11 +157,14 @@ async function buy() {
         <div class="detail-card-head"><h2>商品信息</h2></div>
         <div class="detail-facts">
           <div><strong>{{ stock }}</strong><span>当前库存</span></div>
+          <div><strong>{{ unitPv.toLocaleString('zh-CN') }}</strong><span>单件 PV</span></div>
           <div><strong>{{ product.category?.name ?? '精选商品' }}</strong><span>所属分类</span></div>
         </div>
         <div class="detail-service">
           <span><CircleDollarSign :size="13" aria-hidden="true" />钱包余额支付</span>
-          <span><Wallet :size="13" aria-hidden="true" />钱包消费扣减权益通</span>
+          <span><Wallet :size="13" aria-hidden="true" />权益通仅用于钱包转出</span>
+          <span><TrendingUp :size="13" aria-hidden="true" />业绩按PV × 件数计入</span>
+          <span><BadgeCheck :size="13" aria-hidden="true" />支付成功后按PV × 3发放权益通</span>
           <span v-if="hasMemberPrice"><BadgeCheck :size="13" aria-hidden="true" />会员专属价格</span>
         </div>
       </section>
@@ -172,7 +184,14 @@ async function buy() {
             <span>{{ quantity }}</span>
             <button type="button" aria-label="增加数量" :disabled="quantity >= stock" @click="quantity = Math.min(stock, quantity + 1)"><Plus :size="14" /></button>
           </div>
-          <div class="purchase-total"><small>合计</small><strong>¥{{ money(totalPrice) }}</strong></div>
+          <div class="purchase-totals">
+            <div class="purchase-total-metric purchase-total-metric--money">
+              <small>合计金额</small><strong>¥{{ money(totalPrice) }}</strong>
+            </div>
+            <div class="purchase-total-metric purchase-total-metric--pv">
+              <small>本单计酬 PV</small><strong>{{ totalPv.toLocaleString('zh-CN') }} <span>PV</span></strong>
+            </div>
+          </div>
         </div>
         <button type="button" class="btn btn-primary purchase-button" :disabled="!canBuy" @click="beginCheckout">
           {{ buying ? '提交中…' : stock ? '立即购买' : '暂时缺货' }}
@@ -182,9 +201,9 @@ async function buy() {
 
     <AppModal v-model="checkoutOpen" eyebrow="确认订单" title="确认配送信息"
       description="下单后会保存当前地址快照，用于本笔订单配送。"
-      :confirm-loading="buying" :confirm-disabled="!selectedAddress || !canBuy || quotaExceedsAvailable"
+      :confirm-loading="buying" :confirm-disabled="!selectedAddress || !canBuy"
       :confirm-text="buying ? '提交中…' : `提交订单 · ¥${money(totalPrice)}`"
-      :hint="quotaExceedsAvailable ? '商品金额超过当前可用权益通，请减少购买数量或完成复消后再下单。' : '商品订单会按实际钱包扣款消耗权益通，订单金额不能超过当前可用额度。会员卡订单不消耗权益通。'" @confirm="buy">
+      hint="商品订单使用钱包余额支付，不消耗权益通；权益通仅在钱包转出时消耗。" @confirm="buy">
       <label class="app-field"><span>选择收货地址</span>
         <select v-model="selectedAddressId" class="input">
           <option v-for="address in addresses" :key="address.id" :value="String(address.id)">
@@ -196,11 +215,9 @@ async function buy() {
         <div><strong>{{ selectedAddress.receiver }}</strong><span>{{ selectedAddress.phone }}</span></div>
         <p>{{ selectedAddress.province }}{{ selectedAddress.city }}{{ selectedAddress.district }}{{ selectedAddress.detail }}</p>
       </div>
-      <div v-if="store.profile?.packageId && store.profile?.transferQuotaAccount" class="checkout-quota-summary">
-        <div><span>预计消耗权益通</span><strong>{{ money(quotaSpend) }}</strong></div>
-        <div><span>当前剩余</span><strong>{{ money(availableQuota) }}</strong></div>
-        <div><span>支付后预计剩余</span><strong>{{ money(quotaAfterSpend) }}</strong></div>
-        <p v-if="quotaExceedsAvailable" class="checkout-quota-summary__warning">订单金额超过可用权益通 {{ money(quotaSpend - availableQuota) }}，请减少购买数量或完成复消后再下单。</p>
+      <div v-if="isProductRepurchase" class="checkout-quota-summary">
+        <div><span>会员商品订单奖励权益通</span><strong>+{{ money(repurchaseQuota) }}</strong></div>
+        <p>按本单 {{ totalPv.toLocaleString('zh-CN') }} PV × 3 计算，支付成功后即时入账。</p>
       </div>
       <button type="button" class="checkout-address-manage" @click="checkoutOpen = false; router.push('/addresses')">管理收货地址</button>
     </AppModal>
@@ -209,10 +226,21 @@ async function buy() {
 
 <style scoped>
 .detail-purchase-bar { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 12px; }
+.detail-pv-highlight { display: flex; min-height: 58px; align-items: center; gap: 10px; margin-top: 12px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--line)); border-radius: 12px; background: linear-gradient(100deg, color-mix(in srgb, var(--brand) 16%, var(--surface)), color-mix(in srgb, var(--brand) 5%, var(--surface))); }
+.detail-pv-highlight__icon { display: inline-flex; width: 34px; height: 34px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 10px; background: var(--brand); color: #fff; }
+.detail-pv-highlight__copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.detail-pv-highlight__copy small { color: var(--text-2); font-size: 10px; font-weight: 600; }
+.detail-pv-highlight__copy strong { color: var(--brand); font-family: var(--font-num); font-size: 18px; font-weight: 800; line-height: 1.2; white-space: nowrap; }
+.detail-pv-highlight__copy strong span { font-family: var(--font-sans); font-size: 10px; font-weight: 650; }
+.detail-pv-highlight__hint { margin-left: auto; color: var(--muted); font-size: 9px; white-space: nowrap; }
 .purchase-summary { display: grid; min-width: 0; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 8px; }
 .purchase-summary .quantity-control { justify-self: start; }
-.purchase-total { min-width: 0; flex-direction: row; align-items: baseline; justify-self: center; gap: 5px; white-space: nowrap; }
-.purchase-total strong { font-size: 16px; }
+.purchase-totals { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 6px; }
+.purchase-total-metric { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.purchase-total-metric small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.purchase-total-metric strong { overflow: hidden; color: var(--brand); font-family: var(--font-num); font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.purchase-total-metric--pv { padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--brand) 24%, var(--line)); border-radius: 8px; background: var(--brand-soft); }
+.purchase-total-metric--pv strong span { font-family: var(--font-sans); font-size: 9px; font-weight: 700; }
 .purchase-button { width: 112px; min-width: 0; padding-inline: 10px; }
 .checkout-address-card { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
 .checkout-address-card > div { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 12px; }
@@ -228,14 +256,20 @@ async function buy() {
 @media (max-width: 390px) {
   .detail-purchase-bar { grid-template-columns: minmax(0, 1fr) 100px; gap: 8px; }
   .purchase-summary { grid-template-columns: 82px minmax(0, 1fr); gap: 8px; }
+  .purchase-totals { gap: 4px; }
   .quantity-control button { width: 27px; }
   .quantity-control span { min-width: 22px; }
-  .purchase-total strong { font-size: 14px; }
+  .purchase-total-metric strong { font-size: 12px; }
+  .purchase-total-metric--pv { padding-inline: 5px; }
   .purchase-button { width: 100px; padding-inline: 8px; font-size: 12px; }
 }
 @media (max-width: 350px) {
   .detail-purchase-bar { grid-template-columns: minmax(0, 1fr) 92px; gap: 6px; }
   .purchase-summary { grid-template-columns: 76px minmax(0, 1fr); gap: 6px; }
+  .purchase-totals { gap: 3px; }
+  .purchase-total-metric small { font-size: 8px; }
+  .purchase-total-metric strong { font-size: 11px; }
+  .detail-pv-highlight__hint { display: none; }
   .quantity-control button { width: 24px; }
   .quantity-control span { min-width: 20px; }
   .purchase-button { width: 92px; padding-inline: 6px; }

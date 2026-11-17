@@ -97,17 +97,17 @@ export class SettlementService {
     }
   }
 
-  /** Step2: 补齐当日 COMPLETED 订单的业绩记录（幂等：orderId 唯一） */
+  /** Step2: 补齐当日已支付订单的业绩记录（幂等：orderId 唯一） */
   private async step2Performance(date: Date): Promise<void> {
     const next = new Date(date.getTime() + 86400_000);
     const orders = await this.prisma.order.findMany({
-      where: { status: 3, finishedAt: { gte: date, lt: next }, performance: null },
-      select: { id: true, userId: true, amount: true, finishedAt: true },
+      where: { status: { in: [1, 2, 3] }, paidAt: { gte: date, lt: next }, performance: null },
+      select: { id: true, userId: true, pvAmount: true, paidAt: true },
     });
     for (const o of orders) {
       await this.prisma.orderPerformance.upsert({
         where: { orderId: o.id },
-        create: { orderId: o.id, userId: o.userId, amount: o.amount, occurDate: date },
+        create: { orderId: o.id, userId: o.userId, amount: o.pvAmount, occurDate: o.paidAt ?? date },
         update: {},
       });
     }
@@ -192,7 +192,7 @@ export class SettlementService {
     }
   }
 
-  /** Step5: 各等级人数 + 全网业绩 + 池子快照 */
+  /** Step5: 各等级人数 + 全网计酬PV + 奖金池快照 */
   private async step5Snapshots(date: Date): Promise<void> {
     const ranks = await this.prisma.rank.findMany({ orderBy: { level: 'asc' } });
     const [network, users] = await Promise.all([
@@ -245,7 +245,7 @@ export class SettlementService {
     }
   }
 
-  /** 构建「直接下线 → 子树当日业绩」表，并为每位会员选出自己最大的一条直推线 */
+  /** 构建「直接下线 → 子树当日PV」表，并为每位会员选出自己最大的一条直推线 */
   private buildExclusion(
     rows: Array<{ userId: bigint; teamAmount: bigint; user: { parentId: bigint | null } }>,
     ratio: number,
@@ -274,7 +274,7 @@ export class SettlementService {
     return { enabled, ratio };
   }
 
-  /** Step7: 团队奖 =（伞下当日业绩 - 本人最大直推线业绩）× 自己费率 */
+  /** Step7: 团队奖 =（伞下当日PV - 本人最大直推线PV）× 自己费率 */
   private async step7TeamBonus(date: Date): Promise<void> {
     const ranks = await this.prisma.rank.findMany();
     // 按 level 建索引：teamPerformance 存的是 rankLevel，与 rank.id 无必然关系
@@ -463,7 +463,7 @@ export class SettlementService {
     const txIds = records.map((r) => r.walletTransactionId).filter((id): id is bigint => id !== null);
     const recordIds = records.map((r) => r.id);
 
-    const [walletType1, tokenLots, walletSum, wallets, dividendSum, poolSum, quotaAccounts, quotaTransfers, productWalletSpends] =
+    const [walletType1, tokenLots, walletSum, wallets, dividendSum, poolSum, quotaAccounts, quotaTransfers] =
       await Promise.all([
         txIds.length
           ? this.prisma.walletTransaction.aggregate({ where: { id: { in: txIds } }, _sum: { changeAmount: true } })
@@ -481,18 +481,6 @@ export class SettlementService {
         this.prisma.walletTransfer.groupBy({
           by: ['fromUserId', 'status'], _sum: { amount: true },
         }),
-        this.prisma.$queryRaw<Array<{ userId: bigint; balanceDeduct: bigint }>>`
-          SELECT o."userId", COALESCE(SUM(o."balanceDeduct"), 0)::bigint AS "balanceDeduct"
-          FROM "Order" o
-          WHERE o."type" = 4 AND o."status" IN (1, 2, 3) AND o."balanceDeduct" > 0
-            AND EXISTS (
-              SELECT 1 FROM "Order" p
-              WHERE p."userId" = o."userId" AND p."type" IN (1, 2, 3)
-                AND p."status" = 3
-                AND COALESCE(p."finishedAt", p."paidAt", p."createdAt") <= COALESCE(o."paidAt", o."createdAt")
-            )
-          GROUP BY o."userId"
-        `,
       ]);
 
     const sum = (rows: Array<{ balance?: bigint; frozen?: bigint }>) =>
@@ -504,12 +492,6 @@ export class SettlementService {
       const entry = expectedByUser.get(id) ?? { used: 0n, reserved: 0n };
       if (row.status === 'COMPLETED') entry.used += row._sum.amount ?? 0n;
       if (row.status === 'PENDING') entry.reserved += row._sum.amount ?? 0n;
-      expectedByUser.set(id, entry);
-    }
-    for (const row of productWalletSpends) {
-      const id = row.userId.toString();
-      const entry = expectedByUser.get(id) ?? { used: 0n, reserved: 0n };
-      entry.used += row.balanceDeduct;
       expectedByUser.set(id, entry);
     }
     const quotaByUser = new Map(quotaAccounts.map((row) => [row.userId.toString(), row]));
@@ -530,7 +512,7 @@ export class SettlementService {
       { name: '钱包流水合计 = 钱包余额+冻结', ok: (walletSum._sum.changeAmount ?? 0n) === walletTotal,
         detail: { flow: (walletSum._sum.changeAmount ?? 0n).toString(), balance: walletTotal.toString() } },
       { name: '分红合计 ≤ 分红池总额', ok: (dividendSum._sum.amount ?? 0n) <= (poolSum._sum.poolAmount ?? 0n) },
-      { name: '权益通已用/预占 = 转账及商城钱包消费统计', ok: quotaConsistent },
+      { name: '权益通已用/预占 = 钱包转账统计', ok: quotaConsistent },
     ];
     return { statDate: d.toISOString().slice(0, 10), checks, allPassed: checks.every((c) => c.ok) };
   }

@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useFeaturesStore } from './stores/features';
+import { useBrandStore } from './stores/brand';
+import BrandFooter from './components/BrandFooter.vue';
 import { LayoutDashboard, Network, TrendingUp, Award } from 'lucide-vue-next';
 
 const route = useRoute();
 const features = useFeaturesStore();
+const brand = useBrandStore();
 const showTab = computed(() => !!route.meta.tab);
+const showLegalFooter = computed(() => !['/login', '/auth'].includes(route.path));
+onMounted(() => { brand.load().catch(() => {}); });
+watch(() => brand.settings.brandName, (name) => { document.title = `${name} · 合伙人中心`; }, { immediate: true });
 const tabs = [
   { path: '/', label: '总览', icon: LayoutDashboard },
   { path: '/team', label: '团队', icon: Network, flag: 'team.view' },
@@ -19,6 +25,7 @@ const visibleTabs = computed(() => tabs.filter((tab) => !('flag' in tab) || feat
 <template>
   <div class="phone-shell">
     <router-view />
+    <BrandFooter v-if="showLegalFooter" />
     <nav v-if="showTab" class="tabbar">
       <router-link
         v-for="t in visibleTabs"

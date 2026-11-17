@@ -13,7 +13,7 @@ import {
 
 const RANK_NAMES = ['普通会员', '业务主任', '业务经理', '业务总监', '业务副总', '业务总经理', '业务总裁'];
 const RANK_COLORS = ['#ff5a1f', '#fb923c', '#fbbf24', '#d97706', '#b45309', '#7c2d12', '#a8a29e'];
-const ORDER_STATUS_LABELS = ['待支付', '已支付', '已交付', '已完成'];
+const ORDER_STATUS_LABELS = ['待支付', '已支付待发货', '已发货', '已完成'];
 const ORDER_STATUS_TONES = ['warning', 'brand', 'info', 'success'] as const;
 
 export function Dashboard() {
@@ -97,8 +97,8 @@ export function Dashboard() {
   const todoItems = [
     ...(canOperate ? [{
       to: '/orders?status=1',
-      title: '待交付订单',
-      description: '已付款，等待管理端交付',
+      title: '待发货订单',
+      description: '已支付，业务权益已入账，等待录入物流单号',
       count: pendingDelivery,
       icon: <Truck size={16} />,
     }] : []),
@@ -152,7 +152,7 @@ export function Dashboard() {
       <div className={cx('grid gap-4 sm:grid-cols-2 xl:grid-cols-4', loading && 'opacity-60 transition-opacity')}>
         <StatCard label="会员总数" value={data.memberCount.toLocaleString('zh-CN')} icon={<Users size={17} />} trend="平台注册会员" accent="brand" />
         <StatCard label="今日订单" value={data.todayOrders.toLocaleString('zh-CN')} icon={<Wallet size={17} />} trend="当日新增订单" accent="success" />
-        <StatCard label="今日业绩" value={fmtMoney(data.todayPerformance)} icon={<TrendingUp size={17} />} trend="全网当日新增业绩" accent="warning" />
+        <StatCard label="今日计酬 PV" value={`${Number(data.todayPerformance ?? 0).toLocaleString('zh-CN')} PV`} icon={<TrendingUp size={17} />} trend="新订单PV按商品配置归集" accent="warning" />
         <StatCard label="累计奖金" value={fmtMoney(data.totalBonus)} icon={<CircleDollarSign size={17} />} trend="五条收益线合计" accent="danger" />
       </div>
 

@@ -17,6 +17,7 @@ interface Product {
   images: string[];
   details: string[];
   price: number;
+  pv: number;
   originalPrice: number;
   stock: number;
   sales: number;
@@ -70,7 +71,7 @@ export function Catalog() {
 
   const openNew = () => setEditing({
     name: '', subtitle: '', description: '', categoryId: '', images: [], details: [],
-    price: 0, originalPrice: 0, stock: 0, status: 0, isNew: false, isFeatured: false, sort: 0,
+    price: 0, pv: 0, pvFollowsPrice: true, originalPrice: 0, stock: 0, status: 0, isNew: false, isFeatured: false, sort: 0,
     packageIds: [], exclusivePrices: {},
   });
 
@@ -90,7 +91,7 @@ export function Catalog() {
     if (!editing) return;
     const agreed = await confirm({
       title: editing.id ? `确认保存商品「${editing.name}」？` : `确认创建商品「${editing.name}」？`,
-      description: `售价 ¥${Number(editing.price).toLocaleString('zh-CN')}，库存 ${Number(editing.stock).toLocaleString('zh-CN')}，当前状态为${Number(editing.status) === 1 ? '上架' : '下架'}。保存会影响商城商品信息和会员购买价格。`,
+      description: `售价 ¥${Number(editing.price).toLocaleString('zh-CN')}，单件 PV ${Number(editing.pv).toLocaleString('zh-CN')}，库存 ${Number(editing.stock).toLocaleString('zh-CN')}，当前状态为${Number(editing.status) === 1 ? '上架' : '下架'}。保存会影响商城展示和新订单计酬。`,
       confirmText: editing.id ? '确认保存商品' : '确认创建商品',
       tone: 'danger',
       confirmationText: `${editing.id ? '保存商品' : '创建商品'} ${editing.name}`,
@@ -105,6 +106,7 @@ export function Catalog() {
         images: editing.images,
         details: editing.details,
         price: Number(editing.price),
+        pv: Number(editing.pv),
         originalPrice: Number(editing.originalPrice),
         stock: Number(editing.stock),
         status: Number(editing.status),
@@ -191,7 +193,7 @@ export function Catalog() {
     <>
       <PageHeader
         title="商品管理"
-        description="完整上架管理：分类、图片素材（来自文件管理）、会员档位专属价与可见范围"
+        description="管理商品售价、单件PV、库存、图片素材与会员档位可见范围；会员商品订单支付成功后按订单PV × 3发放权益通"
         action={<Button variant="primary" onClick={openNew}><Plus size={15} /> 新增商品</Button>}
       />
 
@@ -267,6 +269,7 @@ export function Catalog() {
                   <th className="th">商品</th>
                   <th className="th">分类</th>
                   <th className="th text-right">价格</th>
+                  <th className="th text-right">单件 PV</th>
                   <th className="th text-right">库存 / 销量</th>
                   <th className="th">可见档位</th>
                   <th className="th">状态</th>
@@ -305,6 +308,7 @@ export function Catalog() {
                         <div className="num text-2xs text-ink-faint line-through">{fmtMoney(p.originalPrice)}</div>
                       )}
                     </td>
+                    <td className="td num text-right font-medium text-accent-ink">{Number(p.pv).toLocaleString('zh-CN')} PV</td>
                     <td className="td num text-right text-xs text-ink-muted">
                       {p.stock} / {p.sales}
                     </td>
@@ -364,7 +368,7 @@ export function Catalog() {
         onClose={() => setEditing(null)}
         width={760}
         title={editing?.id ? '编辑商品' : '新增商品'}
-        description="图片来自文件管理，可绑定多个会员档并设置专属价"
+        description="设置商品售价与单件PV；会员档位专属价只影响支付金额，不改变商品PV；会员商品订单支付成功后按订单PV × 3发放权益通"
         footer={editing ? (
           <>
             <Button onClick={() => setEditing(null)}>取消</Button>
@@ -400,9 +404,12 @@ export function Catalog() {
 
             <section>
               <SectionLabel>价格与库存</SectionLabel>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="售价（元）" required>
-                  <input className="input" type="number" value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value })} />
+                  <input className="input" type="number" min={0} step={1} value={editing.price} onChange={(e) => setEditing({ ...editing, price: e.target.value, ...(editing.pvFollowsPrice ? { pv: e.target.value } : {}) })} />
+                </Field>
+                <Field label="单件 PV" required hint="默认跟随售价，可单独调整；1 PV = ¥1 奖金基数，会员商品订单按订单PV × 3发放权益通">
+                  <input className="input" type="number" min={0} step={1} value={editing.pv} onChange={(e) => setEditing({ ...editing, pv: e.target.value, pvFollowsPrice: false })} />
                 </Field>
                 <Field label="划线价">
                   <input className="input" type="number" value={editing.originalPrice} onChange={(e) => setEditing({ ...editing, originalPrice: e.target.value })} />

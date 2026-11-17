@@ -61,7 +61,9 @@ const TX_LABEL: Record<string, string> = {
   wallet_transfer_quota_reserve: '权益通预占',
   wallet_transfer_quota_release: '权益通返还',
   wallet_transfer_quota_consume: '钱包转出消耗权益通',
-  wallet_product_spend: '商城消费消耗权益通',
+  wallet_product_spend: '商城订单扣减（旧规则）',
+  wallet_product_spend_reversal: '规则调整退回商城额度',
+  product_repurchase: '商品订单 PV × 3 发放',
   package_1: '会员档位额度发放',
   package_2: '档位升级补充额度',
   package_3: '复消解锁权益通',
@@ -219,13 +221,13 @@ onMounted(load);
       <div class="asset-balance">{{ money(transferQuota?.available) }} <small>权益通</small></div>
       <div class="asset-overview-foot">
         <span>累计获得 {{ money(transferQuota?.granted) }}</span>
-        <span>已消耗 {{ money(transferQuota?.used) }}</span>
+        <span>转出已用 {{ money(transferQuota?.used) }}</span>
         <span>待确认 {{ money(transferQuota?.reserved) }}</span>
       </div>
       <p v-if="quotaOverage > 0" class="asset-description asset-description--warning">
-        历史消费超出当时权益通额度 {{ money(quotaOverage) }}。已支付订单不会自动撤销；商城新订单现已限制在可用权益通内。
+        历史转出超过当时权益通额度 {{ money(quotaOverage) }}。已完成转账不会自动撤销；后续钱包转出仍受当前可用额度限制。
       </p>
-      <p v-else class="asset-description">钱包转出和商城商品订单都会消耗权益通；额度用完后，需完成档位复消才能继续。会员卡购买、升级、复消、收到转账和奖励不消耗权益通。</p>
+      <p v-else class="asset-description">权益通仅在钱包转出时消耗。礼包按PV × 3发放；升级按PV差额 × 3补充；会员普通商品订单支付成功后按订单PV × 3发放。商品消费不扣减权益通。</p>
     </section>
 
     <section v-else class="asset-overview asset-overview--token">
@@ -259,8 +261,8 @@ onMounted(load);
         </strong>
       </article>
     </div>
-    <EmptyState v-else-if="tabs.length && tab === 'quota'" title="额度明细从新规则启用后开始记录"
-      description="历史已完成礼包订单和钱包转出已回算到额度账户；旧历史交易不会补生成额度流水。" />
+    <EmptyState v-else-if="tabs.length && tab === 'quota'" title="暂无权益通变动"
+      description="礼包及会员普通商品订单按PV发放权益通；已完成钱包转出计入已用额度。" />
     <EmptyState v-else-if="tabs.length" title="暂无交易流水" description="账户发生变动后，记录会显示在这里" />
 
     <template v-if="tabs.length && tab !== 'quota'">

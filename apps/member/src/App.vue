@@ -1,14 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useUserStore } from './stores/user';
+import { useBrandStore } from './stores/brand';
+import BrandFooter from './components/BrandFooter.vue';
 import { ArrowDownUp, Share2, ShoppingBag, UserRound } from 'lucide-vue-next';
 
 const route = useRoute();
 const store = useUserStore();
+const brand = useBrandStore();
 const showTab = computed(() => !!route.meta.tab);
+const showLegalFooter = computed(() => !['/login', '/register'].includes(route.path));
 
-onMounted(() => { if (store.loggedIn) store.loadProfile().catch(() => {}); });
+onMounted(() => {
+  brand.load().catch(() => {});
+  if (store.loggedIn) store.loadProfile().catch(() => {});
+});
+watch(
+  [() => brand.settings.brandName, () => brand.settings.storeName],
+  ([name, storeName]) => { document.title = `${name} · ${storeName}`; },
+  { immediate: true },
+);
 
 // 会员端只保留四块：商城 / 分享 / 收益 / 我的
 // 等级、团队、分红池、平级/领导奖等已移至独立合伙人端
@@ -24,6 +36,7 @@ const tabs = computed(() => allTabs.filter((t) => !t.flag || store.has(t.flag)))
 <template>
   <div class="phone-shell">
     <router-view />
+    <BrandFooter v-if="showLegalFooter" />
     <nav v-if="showTab" class="tabbar">
       <router-link v-for="t in tabs" :key="t.path" :to="t.path" class="tab-item"
         :class="{ active: route.path === t.path }">

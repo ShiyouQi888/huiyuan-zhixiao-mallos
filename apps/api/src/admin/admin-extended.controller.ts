@@ -2,6 +2,8 @@ import { Body, Controller, Delete, Get, Headers, Param, Post, Put, Query } from 
 import QRCode from 'qrcode';
 import {
   DEFAULT_REFERRAL_POSTER_TEMPLATE,
+  DEFAULT_BRAND_SETTINGS,
+  type BrandSettings,
   type ReferralPosterLayer,
   type ReferralPosterTemplate,
 } from '@solar/shared';
@@ -43,11 +45,13 @@ export class AdminExtendedController {
 
   @Post('packages')
   @Roles('SUPER_ADMIN')
-  createPackage(@Body() body: { id: number; name: string; level: number; price: number; transferQuota: number; durationDays?: number }) {
+  async createPackage(@Body() body: { id: number; name: string; level: number; price: number; pv?: number; transferQuota?: number; durationDays?: number }) {
+    const pv = this.packagePv(body.pv ?? body.price);
+    await this.assertPackagePvOrder(body.level, pv);
     return this.prisma.package.create({
       data: {
         id: body.id, name: body.name, level: body.level,
-        price: BigInt(body.price), transferQuota: BigInt(body.transferQuota),
+        price: BigInt(body.price), pv, transferQuota: pv * 3n,
         durationDays: body.durationDays ?? 365,
       },
     });
@@ -58,7 +62,7 @@ export class AdminExtendedController {
   async updatePackage(
     @Param('id') id: string,
     @Body() body: Partial<{
-      name: string; price: number; transferQuota: number; durationDays: number; status: number;
+      name: string; price: number; pv: number; transferQuota: number; durationDays: number; status: number;
       directRewardRate: number | null; repurchaseRewardRate: number | null; directReleaseDays: number | null;
     }>,
     @CurrentUser() operator: CurrentUserPayload,
@@ -67,6 +71,10 @@ export class AdminExtendedController {
     if (!Number.isSafeInteger(packageId) || packageId < 1) throw new BusinessException(1001, '礼包档位编号无效');
     const before = await this.prisma.package.findUnique({ where: { id: packageId } });
     if (!before) throw new BusinessException(4003, '礼包档位不存在');
+    const pv = body.pv === undefined ? undefined : this.packagePv(body.pv);
+    const quotaPv = pv ?? before.pv;
+    const transferQuota = quotaPv * 3n;
+    if (pv !== undefined) await this.assertPackagePvOrder(before.level, pv, packageId);
     const directRewardRate = this.packageBonusRate(body.directRewardRate, '新购/升级直推比例');
     const repurchaseRewardRate = this.packageBonusRate(body.repurchaseRewardRate, '复消直推比例');
     if (body.directReleaseDays !== undefined && body.directReleaseDays !== null
@@ -77,7 +85,8 @@ export class AdminExtendedController {
     const data = {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.price !== undefined ? { price: BigInt(body.price) } : {}),
-      ...(body.transferQuota !== undefined ? { transferQuota: BigInt(body.transferQuota) } : {}),
+      ...(pv !== undefined ? { pv } : {}),
+      transferQuota,
       ...(body.durationDays !== undefined ? { durationDays: body.durationDays } : {}),
       ...(body.status !== undefined ? { status: body.status } : {}),
       ...(directRewardRate !== undefined ? { directRewardRate } : {}),
@@ -87,7 +96,8 @@ export class AdminExtendedController {
     const after = {
       ...data,
       ...(body.price !== undefined ? { price: body.price } : {}),
-      ...(body.transferQuota !== undefined ? { transferQuota: body.transferQuota } : {}),
+      ...(pv !== undefined ? { pv: pv.toString() } : {}),
+      transferQuota: transferQuota.toString(),
       directRewardRate: directRewardRate === undefined ? undefined : directRewardRate === null ? null : Number(directRewardRate),
       repurchaseRewardRate: repurchaseRewardRate === undefined ? undefined : repurchaseRewardRate === null ? null : Number(repurchaseRewardRate),
     };
@@ -99,6 +109,8 @@ export class AdminExtendedController {
           operatorType: 'ADMIN', operatorId: operator.id, action: 'PACKAGE_UPDATED',
           targetType: 'PACKAGE', targetId: BigInt(packageId),
           before: {
+            pv: before.pv.toString(),
+            transferQuota: before.transferQuota.toString(),
             directRewardRate: before.directRewardRate === null ? null : Number(before.directRewardRate),
             repurchaseRewardRate: before.repurchaseRewardRate === null ? null : Number(before.repurchaseRewardRate),
             directReleaseDays: before.directReleaseDays,
@@ -117,6 +129,23 @@ export class AdminExtendedController {
       throw new BusinessException(1001, `${label}须在 0-100% 之间，或留空继承全局值`);
     }
     return value / 100;
+  }
+
+  private packagePv(value: number): bigint {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new BusinessException(1001, '档位PV须为大于或等于 0 的整数');
+    }
+    return BigInt(value);
+  }
+
+  private async assertPackagePvOrder(level: number, pv: bigint, excludeId?: number): Promise<void> {
+    const where = excludeId === undefined ? {} : { id: { not: excludeId } };
+    const [lower, higher] = await Promise.all([
+      this.prisma.package.findFirst({ where: { ...where, level: { lt: level } }, orderBy: { level: 'desc' } }),
+      this.prisma.package.findFirst({ where: { ...where, level: { gt: level } }, orderBy: { level: 'asc' } }),
+    ]);
+    if (lower && pv < lower.pv) throw new BusinessException(1001, '档位PV不得低于更低等级的PV，否则无法计算升级PV差额');
+    if (higher && pv > higher.pv) throw new BusinessException(1001, '档位PV不得高于更高等级的PV，否则无法计算升级PV差额');
   }
 
   @Get('products')
@@ -166,7 +195,16 @@ export class AdminExtendedController {
 
   @Post('orders/:no/deliver')
   @Roles('SUPER_ADMIN', 'OPERATOR')
-  async deliver(@Param('no') no: string, @CurrentUser() user: CurrentUserPayload) {
+  async deliver(
+    @Param('no') no: string,
+    @Body() body: { trackingNo?: unknown; shippingCarrier?: unknown },
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    const trackingNo = typeof body?.trackingNo === 'string' ? body.trackingNo.trim() : '';
+    const shippingCarrier = typeof body?.shippingCarrier === 'string' ? body.shippingCarrier.trim() : '';
+    if (!trackingNo) throw new BusinessException(1001, '请填写快递单号后再确认交付');
+    if (trackingNo.length > 128) throw new BusinessException(1001, '快递单号不能超过128个字符');
+    if (shippingCarrier.length > 64) throw new BusinessException(1001, '快递公司名称不能超过64个字符');
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { orderNo: no }, select: { id: true, status: true } });
       if (!order) throw new BusinessException(4003, '订单不存在');
@@ -174,14 +212,14 @@ export class AdminExtendedController {
       const deliveredAt = new Date();
       const updated = await tx.order.updateMany({
         where: { id: order.id, status: 1 },
-        data: { status: 2, deliveredAt },
+        data: { status: 2, deliveredAt, trackingNo, shippingCarrier: shippingCarrier || null },
       });
       if (!updated.count) throw new BusinessException(3002, '订单状态已变化，请刷新后重试');
       await tx.auditLog.create({
         data: {
           operatorType: 'ADMIN', operatorId: user.id, action: 'ORDER_DELIVER',
           targetType: 'ORDER', targetId: order.id,
-          after: { orderNo: no, status: 2, deliveredAt: deliveredAt.toISOString() } as never,
+          after: { orderNo: no, status: 2, deliveredAt: deliveredAt.toISOString(), trackingNo, shippingCarrier: shippingCarrier || null } as never,
         },
       });
       return tx.order.findUnique({ where: { id: order.id } });
@@ -341,8 +379,8 @@ export class AdminExtendedController {
       this.prisma.rank.findFirst({ where: { level: { lt: before.level } }, orderBy: { level: 'desc' } }),
       this.prisma.rank.findFirst({ where: { level: { gt: before.level } }, orderBy: { level: 'asc' } }),
     ]);
-    if (previous && threshold <= previous.threshold) throw new BusinessException(1001, '累计业绩门槛必须高于前一等级');
-    if (next && threshold >= next.threshold) throw new BusinessException(1001, '累计业绩门槛必须低于后一等级');
+    if (previous && threshold <= previous.threshold) throw new BusinessException(1001, '累计PV门槛必须高于前一等级');
+    if (next && threshold >= next.threshold) throw new BusinessException(1001, '累计PV门槛必须低于后一等级');
 
     return this.prisma.$transaction(async (tx) => {
       const rank = await tx.rank.update({ where: { id: rankId }, data: { name, threshold, transferQuotaGrant, teamRate, poolRate } });
@@ -420,7 +458,7 @@ export class AdminExtendedController {
   }
 
   private rankThreshold(value?: number): bigint {
-    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new BusinessException(1001, '累计业绩门槛必须是非负整数');
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new BusinessException(1001, '累计PV门槛必须是非负整数');
     return BigInt(value!);
   }
 
@@ -649,17 +687,100 @@ export class AdminExtendedController {
   @Get('configs')
   @Roles('SUPER_ADMIN')
   configs() {
-    return this.prisma.config.findMany({ orderBy: { key: 'asc' } });
+    return this.prisma.config.findMany({ where: { key: { not: 'brand.settings' } }, orderBy: { key: 'asc' } });
   }
 
   @Put('configs/:key')
   @Roles('SUPER_ADMIN')
   async updateConfig(@Param('key') key: string, @Body() body: { value: unknown }) {
+    if (key === 'brand.settings') throw new BusinessException(1001, '品牌设置请通过「品牌与备案」页面修改');
     const result = await this.prisma.config.update({
       where: { key },
       data: { value: body.value as never, version: { increment: 1 } },
     });
     await this.config.invalidate(key);
+    return result;
+  }
+
+  @Get('brand')
+  @Roles('SUPER_ADMIN')
+  async getBrandSettings() {
+    const settings = await this.config.get<Partial<BrandSettings>>('brand.settings', DEFAULT_BRAND_SETTINGS);
+    return { ...DEFAULT_BRAND_SETTINGS, ...settings };
+  }
+
+  @Put('brand')
+  @Roles('SUPER_ADMIN')
+  async updateBrandSettings(
+    @Body() body: unknown,
+    @CurrentUser() operator: CurrentUserPayload,
+  ) {
+    const settings = this.normalizeBrandSettings(body);
+    const previous = await this.config.get<BrandSettings>('brand.settings', DEFAULT_BRAND_SETTINGS);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.config.upsert({
+        where: { key: 'brand.settings' },
+        create: {
+          key: 'brand.settings', group: 'brand', description: '会员端与合伙人端品牌及备案信息',
+          value: settings as never,
+        },
+        update: { value: settings as never, version: { increment: 1 } },
+      });
+      await tx.auditLog.create({
+        data: {
+          operatorType: 'ADMIN', operatorId: operator.id, action: 'BRAND_SETTINGS_UPDATED',
+          targetType: 'CONFIG', before: previous as never, after: settings as never,
+          remark: '品牌及双备案信息设置',
+        },
+      });
+    });
+    await this.config.invalidate('brand.settings');
+    return settings;
+  }
+
+  private normalizeBrandSettings(input: unknown): BrandSettings {
+    const invalid = (message: string): never => { throw new BusinessException(1001, `品牌设置无效：${message}`); };
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return invalid('缺少品牌信息');
+    const value = input as Record<string, unknown>;
+    const fields: Array<keyof BrandSettings> = [
+      'brandName', 'storeName', 'tagline', 'logoUrl', 'footerText',
+      'icpFilingNumber', 'icpFilingUrl', 'publicSecurityFilingNumber', 'publicSecurityFilingUrl',
+    ];
+    const limits: Record<keyof BrandSettings, number> = {
+      brandName: 40, storeName: 40, tagline: 100, logoUrl: 500, footerText: 120,
+      icpFilingNumber: 80, icpFilingUrl: 500, publicSecurityFilingNumber: 100, publicSecurityFilingUrl: 500,
+    };
+    const result = { ...DEFAULT_BRAND_SETTINGS };
+    for (const key of fields) {
+      const raw = value[key] ?? DEFAULT_BRAND_SETTINGS[key];
+      if (typeof raw !== 'string') return invalid(`${key} 必须是文本`);
+      const text = raw.trim();
+      if (text.length > limits[key]) return invalid(`${key} 最多 ${limits[key]} 个字符`);
+      result[key] = text;
+    }
+    if (!result.brandName) return invalid('品牌名称不能为空');
+    if (!result.storeName) return invalid('商城名称不能为空');
+    if (result.logoUrl) {
+      const localUpload = result.logoUrl.startsWith('/uploads/');
+      let secureRemote = false;
+      try {
+        const url = new URL(result.logoUrl);
+        secureRemote = url.protocol === 'https:' || url.protocol === 'http:';
+      } catch { /* only absolute HTTP URLs and local uploads are accepted */ }
+      if (!localUpload && !secureRemote) return invalid('Logo 仅支持文件库素材或 HTTP(S) 图片地址');
+    }
+    if (result.icpFilingUrl) {
+      try {
+        const url = new URL(result.icpFilingUrl);
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return invalid('ICP备案查询链接必须使用 HTTP(S)');
+      } catch { return invalid('ICP备案查询链接格式无效'); }
+    }
+    if (result.publicSecurityFilingUrl) {
+      try {
+        const url = new URL(result.publicSecurityFilingUrl);
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return invalid('公安备案查询链接必须使用 HTTP(S)');
+      } catch { return invalid('公安备案查询链接格式无效'); }
+    }
     return result;
   }
 

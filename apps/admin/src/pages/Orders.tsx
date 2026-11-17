@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, MapPin, Package, RefreshCw, Truck } from 'lucide-react';
 import { api, fmtDate, fmtMoney, getAdminRole, post } from '../api';
 import {
-  Badge, Button, Card, Empty, ErrorBlock, FilterBar, KeyValue, LoadingBlock, Modal, PageHeader,
-  Pagination, SearchField, SelectField, TableSkeleton, Toast, cx, useConfirm,
+  Badge, Button, Card, Empty, ErrorBlock, Field, FilterBar, KeyValue, LoadingBlock, Modal, PageHeader,
+  Pagination, SearchField, SelectField, TableSkeleton, TextInput, Toast, cx, useConfirm,
 } from '../components/ui';
 
 const TYPE_NAMES: Record<number, string> = { 1: '新购礼包', 2: '档位升级', 3: '复消', 4: '普通商品' };
-const STATUS_NAMES = ['待支付', '已支付', '已交付', '已完成'];
+const STATUS_NAMES = ['待支付', '已支付待发货', '已发货', '已完成'];
 const STATUS_TONES = ['warning', 'brand', 'info', 'success'] as const;
 const PAGE_SIZE = 20;
 
@@ -15,19 +15,24 @@ interface Order {
   id: string | number;
   orderNo: string;
   type: number;
+  isRepurchase: boolean;
   amount: number;
+  pvAmount: number | string;
   equityDeduct: number;
   balanceDeduct: number;
   cashPay: number;
   status: number;
   createdAt: string;
   paidAt?: string | null;
+  businessEffectsAppliedAt?: string | null;
+  shippingCarrier?: string | null;
+  trackingNo?: string | null;
   deliveredAt?: string | null;
   finishedAt?: string | null;
   remark?: string | null;
   shippingAddress?: { receiver: string; phone: string; province: string; city: string; district: string; detail: string } | null;
   user?: { nickname?: string | null; phone?: string | null };
-  items?: Array<{ id: string | number; name: string; price: number; quantity: number; amount: number }>;
+  items?: Array<{ id: string | number; name: string; price: number; pv: number | string; quantity: number; amount: number }>;
 }
 
 interface OrderPage {
@@ -50,6 +55,8 @@ export function Orders() {
   const [detailError, setDetailError] = useState('');
   const [deliveryBusy, setDeliveryBusy] = useState(false);
   const [deliveryMessage, setDeliveryMessage] = useState('');
+  const [shippingCarrier, setShippingCarrier] = useState('');
+  const [trackingNo, setTrackingNo] = useState('');
   const [toast, setToast] = useState('');
   const { confirm, confirmNode } = useConfirm();
   const canDeliver = ['SUPER_ADMIN', 'OPERATOR'].includes(getAdminRole() ?? '');
@@ -80,6 +87,8 @@ export function Orders() {
     setDetail(order);
     setDetailError('');
     setDeliveryMessage('');
+    setShippingCarrier(order.shippingCarrier ?? '');
+    setTrackingNo(order.trackingNo ?? '');
     setDetailLoading(true);
     try {
       setDetail(await api<Order>(`/admin/orders/${encodeURIComponent(order.orderNo)}`));
@@ -98,9 +107,13 @@ export function Orders() {
 
   const markDelivered = async () => {
     if (!detail || detail.status !== 1 || !canDeliver) return;
+    if (!trackingNo.trim()) {
+      setDeliveryMessage('请先填写快递单号。');
+      return;
+    }
     const agreed = await confirm({
       title: '确认订单已交付？',
-      description: `订单 ${detail.orderNo} 将标记为已交付，并写入订单状态流水。`,
+      description: `订单 ${detail.orderNo} 将登记运单信息并标记为已发货。订单业绩与权益已在支付成功时入账。`,
       confirmText: '确认交付',
       confirmationText: `交付订单 ${detail.orderNo}`,
     });
@@ -108,11 +121,14 @@ export function Orders() {
     setDeliveryBusy(true);
     setDeliveryMessage('');
     try {
-      const updated = await post<Order>(`/admin/orders/${encodeURIComponent(detail.orderNo)}/deliver`);
+      const updated = await post<Order>(`/admin/orders/${encodeURIComponent(detail.orderNo)}/deliver`, {
+        shippingCarrier: shippingCarrier.trim() || undefined,
+        trackingNo: trackingNo.trim(),
+      });
       setDetail((current) => current ? { ...current, ...updated } : current);
       setOrders((current) => current.map((order) => order.orderNo === updated.orderNo ? { ...order, ...updated } : order));
-      setDeliveryMessage('订单已标记为交付完成');
-      setToast('订单已标记为交付完成');
+      setDeliveryMessage('物流信息已登记，订单已标记为发货。');
+      setToast('物流信息已登记');
     } catch (e) {
       setDeliveryMessage(e instanceof Error ? e.message : '交付状态更新失败');
     } finally {
@@ -127,7 +143,7 @@ export function Orders() {
     <>
       <PageHeader
         title="订单管理"
-        description="查看礼包、升级、复消与商品订单，支持按状态和类型筛选"
+        description="支付成功即登记业绩、权益与奖励计划；在订单详情录入运单后确认发货。"
         action={(
           <Button variant="secondary" onClick={() => void load()} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />刷新
@@ -188,6 +204,7 @@ export function Orders() {
                   <th className="th">会员</th>
                   <th className="th">类型</th>
                   <th className="th text-right">订单金额</th>
+                  <th className="th text-right">计酬 PV</th>
                   <th className="th">支付构成</th>
                   <th className="th text-right">现金支付</th>
                   <th className="th">状态</th>
@@ -203,8 +220,12 @@ export function Orders() {
                       <div className="cell-strong truncate">{order.user?.nickname ?? '—'}</div>
                       <div className="cell-muted mono">{order.user?.phone ?? ''}</div>
                     </td>
-                    <td className="td"><Badge tone="neutral">{TYPE_NAMES[order.type] ?? '订单'}</Badge></td>
+                    <td className="td">
+                      <Badge tone="neutral">{TYPE_NAMES[order.type] ?? '订单'}</Badge>
+                      {order.type === 4 && order.isRepurchase && <Badge tone="info">会员商品订单奖励</Badge>}
+                    </td>
                     <td className="td num text-right font-medium text-ink">{fmtMoney(order.amount)}</td>
+                    <td className="td num text-right text-accent-ink">{Number(order.pvAmount ?? order.amount).toLocaleString('zh-CN')} PV</td>
                     <td className="td">
                       {Number(order.equityDeduct) > 0 && <div className="num text-2xs text-ink-muted">历史权益抵扣 {fmtMoney(order.equityDeduct)}</div>}
                       <div className="num text-2xs text-ink-faint">钱包余额 {fmtMoney(order.balanceDeduct)}</div>
@@ -241,7 +262,7 @@ export function Orders() {
           <>
             <Button onClick={closeDetail}>关闭</Button>
             {detail.status === 1 && canDeliver && (
-              <Button variant="primary" onClick={() => void markDelivered()} disabled={deliveryBusy}>
+              <Button variant="primary" onClick={() => void markDelivered()} disabled={deliveryBusy || !trackingNo.trim()}>
                 {deliveryBusy ? <RefreshCw size={14} className="animate-spin" /> : <Truck size={14} />}
                 {deliveryBusy ? '处理中…' : '确认交付'}
               </Button>
@@ -264,6 +285,9 @@ export function Orders() {
             <div className="subtle-panel grid gap-x-6 gap-y-4 p-4 sm:grid-cols-2">
               <KeyValue label="会员" value={detail.user?.nickname ?? '—'} />
               <KeyValue label="手机号" value={detail.user?.phone ?? '—'} mono />
+              <KeyValue label="订单计酬PV" value={`${Number(detail.pvAmount ?? detail.amount).toLocaleString('zh-CN')} PV`} />
+              <KeyValue label="业务入账时间" value={fmtDate(detail.businessEffectsAppliedAt)} />
+              {detail.type === 4 && <KeyValue label="权益通处理" value={detail.isRepurchase ? '支付成功后按订单PV × 3发放' : '非档位会员商品订单，不增发权益通'} />}
               <KeyValue label="创建时间" value={fmtDate(detail.createdAt)} />
               <KeyValue label="支付时间" value={fmtDate(detail.paidAt)} />
               <KeyValue label="交付时间" value={fmtDate(detail.deliveredAt)} />
@@ -280,6 +304,32 @@ export function Orders() {
                     {detail.shippingAddress.province}{detail.shippingAddress.city}{detail.shippingAddress.district}{detail.shippingAddress.detail}
                   </div>
                 </div>
+              </section>
+            )}
+
+            {(detail.trackingNo || detail.shippingCarrier) && (
+              <section className="notice notice-success">
+                <Truck size={15} className="mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="mb-1 text-xs font-medium text-ink-soft">物流信息</div>
+                  <div className="text-sm font-medium text-ink">{detail.shippingCarrier || '快递'} · {detail.trackingNo || '暂无单号'}</div>
+                  <div className="mt-1 text-xs text-ink-muted">{detail.deliveredAt ? `发货时间 ${fmtDate(detail.deliveredAt)}` : '运单信息已登记'}</div>
+                </div>
+              </section>
+            )}
+
+            {detail.status === 1 && canDeliver && (
+              <section className="subtle-panel grid gap-3 p-4 sm:grid-cols-2" aria-label="填写物流信息">
+                <div className="sm:col-span-2">
+                  <div className="text-sm font-semibold text-ink">发货信息</div>
+                  <p className="mt-1 text-xs text-ink-muted">录入快递单号后确认发货，会员可在 H5 订单中心查看。</p>
+                </div>
+                <Field label="快递公司">
+                  <TextInput className="input" value={shippingCarrier} onChange={(event) => setShippingCarrier(event.target.value.slice(0, 64))} placeholder="例如：顺丰速运（选填）" />
+                </Field>
+                <Field label="快递单号" required>
+                  <TextInput className="input" value={trackingNo} onChange={(event) => setTrackingNo(event.target.value.slice(0, 128))} placeholder="请输入快递单号" />
+                </Field>
               </section>
             )}
 
@@ -308,6 +358,7 @@ export function Orders() {
                       <tr>
                         <th className="th">商品</th>
                         <th className="th text-right">单价</th>
+                        <th className="th text-right">单件 PV</th>
                         <th className="th text-right">数量</th>
                         <th className="th text-right">小计</th>
                       </tr>
@@ -317,6 +368,7 @@ export function Orders() {
                         <tr key={item.id}>
                           <td className="td text-ink">{item.name}</td>
                           <td className="td num text-right">{fmtMoney(item.price)}</td>
+                          <td className="td num text-right text-accent-ink">{Number(item.pv).toLocaleString('zh-CN')} PV</td>
                           <td className="td num text-right">{item.quantity}</td>
                           <td className="td num text-right font-medium text-ink">{fmtMoney(item.amount)}</td>
                         </tr>
@@ -338,10 +390,10 @@ export function Orders() {
               </div>
             )}
 
-            {detail.status === 2 && (
+            {detail.status >= 2 && (
               <div className="notice notice-success">
                 <CheckCircle2 size={14} />
-                已交付{detail.deliveredAt ? ` · ${fmtDate(detail.deliveredAt)}` : ''}
+                已发货{detail.deliveredAt ? ` · ${fmtDate(detail.deliveredAt)}` : ''}
               </div>
             )}
             {deliveryMessage && (

@@ -7,6 +7,7 @@ import {
 } from '../components/ui';
 
 const percent = (value: unknown) => `${(Number(value) * 100).toFixed(1)}%`;
+const formatPv = (value: unknown) => `${Number(value ?? 0).toLocaleString('zh-CN')} PV`;
 
 export function Ranks() {
   const [tab, setTab] = useState<'config' | 'logs'>('config');
@@ -40,7 +41,7 @@ export function Ranks() {
     if (!editing) return;
     const agreed = await confirm({
       title: creating ? '确认新增会员等级？' : `确认保存「${editing.name}」等级规则？`,
-      description: `等级门槛 ¥${Number(editing.threshold).toLocaleString('zh-CN')}，团队奖费率 ${(Number(editing.teamRate) * 100).toFixed(2)}%，分红池比例 ${(Number(editing.poolRate) * 100).toFixed(2)}%。修改会影响后续自动晋级和日结计算。`,
+      description: `团队累计PV门槛 ${formatPv(editing.threshold)}，团队奖费率 ${(Number(editing.teamRate) * 100).toFixed(2)}%，分红池比例 ${(Number(editing.poolRate) * 100).toFixed(2)}%。修改会影响后续自动晋级和日结计算。`,
       confirmText: creating ? '确认新增等级' : '确认保存等级规则',
       tone: 'danger',
       confirmationText: `${creating ? '新增' : '保存'}等级规则 ${editing.name}`,
@@ -119,18 +120,18 @@ export function Ranks() {
     <>
       <PageHeader
         title="等级管理"
-        description="配置业务等级晋升额度、业绩门槛与分配比例，并查看会员升级记录"
+        description="配置PV晋升门槛、晋升新增权益通额度与分配比例，并查看会员升级记录"
         action={canManage ? <Button variant="primary" onClick={openCreate}><Plus size={15} />新增等级</Button> : undefined}
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="等级层级" value={String(ranks.length)} icon={<Layers size={17} />} accent="brand" trend={`启用 ${ranks.filter((rank) => rank.status === 1).length} 个等级`} />
         <StatCard
-          label="最高业绩门槛"
-          value={fmtMoney(Math.max(0, ...ranks.map((r) => Number(r.threshold) || 0)))}
+          label="最高累计 PV 门槛"
+          value={formatPv(Math.max(0, ...ranks.map((r) => Number(r.threshold) || 0)))}
           icon={<TrendingUp size={17} />}
           accent="success"
-          trend="累计业绩达到门槛自动升级"
+          trend="团队累计PV达到门槛自动升级"
         />
         <StatCard label="升级记录" value={String(logs.length)} icon={<ArrowUpRight size={17} />} accent="info" trend="含自动升级与手工调整" />
         <StatCard label="自动升级占比" value={logs.length ? `${Math.round((autoLogs / logs.length) * 100)}%` : '—'} icon={<Users size={17} />} accent="warning" trend={`自动 ${autoLogs} 条 / 手工 ${logs.length - autoLogs} 条`} />
@@ -150,7 +151,7 @@ export function Ranks() {
         <Card className="overflow-hidden">
           <CardHeader
             title="等级参数"
-            description="配置晋升新增权益通额度与业务分配比例；跨级手动调整会累计所跨启用等级的额度"
+            description="等级晋升按团队累计PV判断；跨级手动调整会累计所跨启用等级的权益通额度"
           />
           {loading ? <TableSkeleton rows={7} cols={6} /> : ranks.length === 0 ? (
             <Empty text="暂无等级配置" description="等级体系由后端初始化，如缺失请检查基础数据。" icon={<Layers size={18} />} />
@@ -161,7 +162,7 @@ export function Ranks() {
                   <tr>
                     <th className="th">等级</th>
                     <th className="th">名称</th>
-                    <th className="th text-right">累计业绩门槛</th>
+                    <th className="th text-right">累计计酬 PV 门槛</th>
                     <th className="th text-right">晋升新增权益通</th>
                     <th className="th text-right">团队奖费率</th>
                     <th className="th text-right">分红池比例</th>
@@ -174,7 +175,7 @@ export function Ranks() {
                     <tr key={r.id} className="admin-row">
                       <td className="td"><Badge tone={r.level > 0 ? 'brand' : 'neutral'}>Lv.{r.level}</Badge></td>
                       <td className="td"><span className="cell-strong">{r.name}</span></td>
-                      <td className="td num text-right">{fmtMoney(r.threshold)}</td>
+                      <td className="td num text-right text-accent-ink">{formatPv(r.threshold)}</td>
                       <td className="td num text-right text-accent-ink">{fmtMoney(r.transferQuotaGrant)}</td>
                       <td className="td num text-right text-accent-ink">{percent(r.teamRate)}</td>
                       <td className="td num text-right text-success">{percent(r.poolRate)}</td>
@@ -198,7 +199,7 @@ export function Ranks() {
         <Card className="overflow-hidden">
           <CardHeader title="升级记录" description="自动升级由日结任务触发，手工调整为运营操作" />
           {loading ? <TableSkeleton rows={8} cols={5} /> : logs.length === 0 ? (
-            <Empty text="暂无升级记录" description="会员达到业绩门槛后，升级记录会显示在这里。" icon={<ArrowUpRight size={18} />} />
+            <Empty text="暂无升级记录" description="会员达到PV门槛或管理员调整职级后，记录会显示在这里。" icon={<ArrowUpRight size={18} />} />
           ) : (
             <div className="table-wrap">
               <table className="admin-table">
@@ -222,7 +223,7 @@ export function Ranks() {
                           <Badge tone="brand">Lv.{l.toLevel}</Badge>
                         </div>
                       </td>
-                      <td className="td num text-right">{fmtMoney(l.totalPerformance)}</td>
+                      <td className="td num text-right text-accent-ink">{formatPv(l.totalPerformance)}</td>
                       <td className="td">
                         <Badge tone={l.triggerType === 'AUTO' ? 'success' : 'warning'}>
                           {l.triggerType === 'AUTO' ? '自动' : '手工'}
@@ -256,7 +257,7 @@ export function Ranks() {
             <Field label="等级名称" required>
               <TextInput value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
-            <Field label="累计业绩门槛（元）" hint="达到该累计业绩后自动升级到此等级">
+            <Field label="团队累计计酬 PV 门槛" hint="历史累计业绩保留原数值；新订单按PV累加">
               <input
                 className="input"
                 type="number"

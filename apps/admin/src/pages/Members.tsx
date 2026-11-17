@@ -659,7 +659,7 @@ export function Members() {
                   <th className="th">邀请码</th>
                   <th className="th">档位</th>
                   <th className="th">等级</th>
-                  <th className="th text-right">团队累计业绩</th>
+                  <th className="th text-right">团队累计计酬 PV</th>
                   <th className="th">钱包 / 权益通</th>
                   <th className="th">状态</th>
                   <th className="th text-right">操作</th>
@@ -690,7 +690,7 @@ export function Members() {
                     <td className="td">
                       <Badge tone={m.rankLevel > 0 ? 'brand' : 'neutral'}>{rankName(m.rankLevel)}</Badge>
                     </td>
-                    <td className="td num text-right font-medium text-ink">{fmtMoney(m.totalTeamPerformance)}</td>
+                    <td className="td num text-right font-medium text-accent-ink">{Number(m.totalTeamPerformance ?? 0).toLocaleString('zh-CN')} PV</td>
                     <td className="td">
                       <div className="num text-xs text-ink-soft">{fmtMoney(m.wallet?.balance)}</div>
                   <div className="num text-2xs text-ink-faint">剩余权益通 {fmtMoney(Math.max(0, Number(m.transferQuotaAccount?.granted ?? 0) - Number(m.transferQuotaAccount?.adjustedOut ?? 0) - Number(m.transferQuotaAccount?.used ?? 0) - Number(m.transferQuotaAccount?.reserved ?? 0)))}</div>
@@ -856,7 +856,7 @@ export function Members() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ProfileMetric label="累计权益通" value={fmtMoney(managedMember?.transferQuotaAccount?.granted)} icon={<CircleDollarSign size={15} />} />
                   <ProfileMetric label="已调减额度" value={fmtMoney(managedMember?.transferQuotaAccount?.adjustedOut)} icon={<ShieldOff size={15} />} />
-                  <ProfileMetric label="已使用额度" value={fmtMoney(managedMember?.transferQuotaAccount?.used)} icon={<TrendingUp size={15} />} />
+                  <ProfileMetric label="钱包转出已用" value={fmtMoney(managedMember?.transferQuotaAccount?.used)} icon={<TrendingUp size={15} />} />
                   <ProfileMetric label="转账预占" value={fmtMoney(managedMember?.transferQuotaAccount?.reserved)} icon={<GitBranch size={15} />} />
                   <ProfileMetric label="当前可用" value={fmtMoney(Math.max(0, Number(managedMember?.transferQuotaAccount?.granted ?? 0) - Number(managedMember?.transferQuotaAccount?.adjustedOut ?? 0) - Number(managedMember?.transferQuotaAccount?.used ?? 0) - Number(managedMember?.transferQuotaAccount?.reserved ?? 0)))} icon={<Wallet size={15} />} />
                 </div>
@@ -965,7 +965,7 @@ export function Members() {
         ) : profile && (
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-3">
-              <ProfileMetric label="团队累计业绩" value={fmtMoney(profile.totalTeamPerformance)} icon={<TrendingUp size={15} />} />
+              <ProfileMetric label="团队累计计酬 PV" value={`${Number(profile.totalTeamPerformance ?? 0).toLocaleString('zh-CN')} PV`} icon={<TrendingUp size={15} />} />
               <ProfileMetric
                 label="钱包可用余额"
                 value={fmtMoney(Number(profile.wallet?.balance ?? 0) - Number(profile.wallet?.frozen ?? 0))}

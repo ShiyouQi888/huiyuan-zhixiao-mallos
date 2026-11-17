@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import { Button } from './ui';
 import { ThemeToggle } from './ThemeToggle';
-import { canAccessAdminPath, getAdminRole } from '../api';
+import { api, canAccessAdminPath, getAdminRole, resolveAssetUrl } from '../api';
+import { DEFAULT_BRAND_SETTINGS, type BrandSettings } from '../../../../packages/shared/src/brand-settings';
 
 const navGroups = [
   {
@@ -64,6 +65,7 @@ const ROLE_LABELS: Record<string, string> = {
 export function Layout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [brand, setBrand] = useState<BrandSettings>(DEFAULT_BRAND_SETTINGS);
   const navigate = useNavigate();
   const location = useLocation();
   const role = getAdminRole();
@@ -87,6 +89,23 @@ export function Layout({ children }: { children: ReactNode }) {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    let active = true;
+    const applyBrand = (settings: Partial<BrandSettings>) => {
+      if (active) setBrand({ ...DEFAULT_BRAND_SETTINGS, ...settings });
+    };
+    api<BrandSettings>('/brand').then(applyBrand).catch(() => {});
+    const onBrandUpdated = (event: Event) => {
+      const settings = (event as CustomEvent<BrandSettings>).detail;
+      if (settings) applyBrand(settings);
+    };
+    window.addEventListener('solar:brand-updated', onBrandUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener('solar:brand-updated', onBrandUpdated);
+    };
+  }, []);
+
   const logout = () => {
     localStorage.removeItem('solar_admin_token');
     localStorage.removeItem('solar_admin_access');
@@ -100,14 +119,16 @@ export function Layout({ children }: { children: ReactNode }) {
           ${collapsed ? 'w-[72px]' : 'w-[240px]'}
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        <div className={`relative flex h-[60px] shrink-0 items-center border-b border-line ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>
+        <div className={`relative flex h-[60px] shrink-0 items-center border-b border-line ${collapsed ? 'justify-between px-1' : 'gap-2.5 px-4'}`}>
+          <div className={`brand-mark flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg ${brand.logoUrl ? 'bg-transparent shadow-none' : 'bg-accent shadow-xs'}`}>
+            {brand.logoUrl
+              ? <img src={resolveAssetUrl(brand.logoUrl)} alt="" aria-hidden="true" className="h-full w-full object-contain p-1" />
+              : <Gift size={17} aria-hidden="true" />}
+          </div>
           {!collapsed && (
             <>
-              <div className="brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent shadow-xs">
-                <Gift size={17} aria-hidden="true" />
-              </div>
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold leading-5 text-ink">太阳线会员系统</div>
+                <div className="truncate text-[13px] font-semibold leading-5 text-ink" title={brand.brandName}>{brand.brandName}</div>
                 <div className="truncate text-2xs leading-4 text-ink-faint">运营管理平台</div>
               </div>
             </>

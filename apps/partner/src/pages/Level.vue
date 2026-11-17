@@ -50,7 +50,7 @@ function formatDate(value: string) {
     <PageHeading
       eyebrow="职级体系"
       title="我的等级"
-      subtitle="团队累计业绩自动升级，等级与规则由平台实时下发"
+      subtitle="团队累计PV达到等级门槛后自动升级；1 PV = ¥1 奖金基数"
     />
 
     <div v-if="loading" class="card rank-loading">正在读取等级信息…</div>
@@ -78,8 +78,8 @@ function formatDate(value: string) {
         </div>
 
         <div class="rank-performance">
-          <span>团队累计业绩</span>
-          <strong>¥{{ money(rank.totalPerformance) }}</strong>
+          <span>团队累计计酬 PV</span>
+          <strong>{{ money(rank.totalPerformance) }} PV</strong>
         </div>
 
         <ProgressBar
@@ -87,7 +87,7 @@ function formatDate(value: string) {
           class="rank-progress"
           :value="progress"
           :label="`距 ${rank.nextRank.name}`"
-          :hint="`还差 ¥${money(rank.nextRank.gap)}`"
+          :hint="`还差 ${money(rank.nextRank.gap)} PV`"
         />
         <div v-else-if="isTopRank" class="rank-state rank-state--complete">
           <Check :size="14" aria-hidden="true" />已达到最高职级
@@ -118,7 +118,7 @@ function formatDate(value: string) {
                 {{ item.name }}
                 <span v-if="item.level === rank.rankLevel" class="rank-current-tag">当前</span>
               </span>
-              <span class="rank-threshold">团队累计 ¥{{ money(item.threshold) }}</span>
+              <span class="rank-threshold">团队累计 {{ money(item.threshold) }} PV</span>
             </span>
           </div>
           <div class="rank-rates">
@@ -140,7 +140,7 @@ function formatDate(value: string) {
               {{ log.triggerType === 'MANUAL' ? '管理员调整' : '业绩自动晋升' }} · {{ formatDate(log.createdAt) }}
             </div>
           </div>
-          <span class="history-value">累计 ¥{{ money(log.totalPerformance) }}</span>
+          <span class="history-value">累计 {{ money(log.totalPerformance) }} PV</span>
         </div>
       </div>
       <EmptyState

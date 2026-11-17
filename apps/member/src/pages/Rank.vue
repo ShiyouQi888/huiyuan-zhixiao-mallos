@@ -38,7 +38,7 @@ function formatDate(value: string) {
 <template>
   <div class="page rank-page">
     <div class="title">我的等级</div>
-    <div class="subtitle">职级配置、团队业绩与等级变更记录实时同步</div>
+    <div class="subtitle">团队业绩按PV归集，1 PV = ¥1 奖金基数</div>
 
     <div v-if="loading" class="card rank-loading" aria-live="polite">正在读取等级信息…</div>
     <template v-else-if="rank">
@@ -62,13 +62,13 @@ function formatDate(value: string) {
           </div>
         </div>
         <div class="rank-performance">
-          <span class="subtitle">团队累计业绩</span>
-          <strong>¥{{ money(rank.totalPerformance) }}</strong>
+          <span class="subtitle">团队累计计酬 PV</span>
+          <strong>{{ money(rank.totalPerformance) }} PV</strong>
         </div>
         <div v-if="isTopRank" class="rank-top-state"><Check :size="14" aria-hidden="true" />已达到最高职级</div>
         <div v-else-if="rank.nextRank" class="rank-next-state">
           <ArrowUpRight :size="14" aria-hidden="true" />
-          距离 {{ rank.nextRank.name }} 还差 ¥{{ money(rank.nextRank.gap) }} 团队业绩
+          距离 {{ rank.nextRank.name }} 还差 {{ money(rank.nextRank.gap) }} PV
         </div>
         <div v-if="rank.peerBonusLocked" class="tag row gap-8 rank-peer-lock"><Check :size="14" aria-hidden="true" />平级奖资格已永久锁定</div>
       </div>
@@ -83,7 +83,7 @@ function formatDate(value: string) {
             </div>
             <div class="rank-path-copy">
               <div class="rank-path-name">{{ item.name }}<span v-if="item.level === rank.rankLevel" class="rank-current-label">当前</span></div>
-              <div class="subtitle rank-threshold">团队累计 ¥{{ money(item.threshold) }}</div>
+              <div class="subtitle rank-threshold">团队累计 {{ money(item.threshold) }} PV</div>
             </div>
           </div>
           <div class="rank-path-rates">
@@ -101,7 +101,7 @@ function formatDate(value: string) {
             <div class="rank-history-title">{{ log.fromRankName }}<ArrowUpRight :size="13" aria-hidden="true" />{{ log.toRankName }}</div>
             <div class="subtitle rank-history-meta">{{ log.triggerType === 'MANUAL' ? '管理员调整' : '业绩自动晋升' }} · {{ formatDate(log.createdAt) }}</div>
           </div>
-          <div class="rank-history-performance">累计 ¥{{ money(log.totalPerformance) }}</div>
+          <div class="rank-history-performance">累计 {{ money(log.totalPerformance) }} PV</div>
         </div>
       </div>
       <div v-else class="card rank-history-empty">暂无等级变更记录</div>

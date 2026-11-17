@@ -10,6 +10,7 @@ export interface ProductInput {
   images?: string[];
   details?: string[];
   price: number;
+  pv?: number;
   originalPrice?: number;
   stock?: number;
   status?: number;
@@ -24,6 +25,13 @@ export interface ProductInput {
 @Injectable()
 export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private validatePv(value: number): number {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new BusinessException(1001, '商品PV须为大于或等于 0 的整数');
+    }
+    return value;
+  }
 
   /* ---------- 分类 ---------- */
 
@@ -118,6 +126,7 @@ export class CatalogService {
           images: (data.images ?? []) as never,
           details: (data.details ?? []) as never,
           price: BigInt(data.price),
+          pv: BigInt(this.validatePv(data.pv ?? data.price)),
           originalPrice: BigInt(data.originalPrice ?? 0),
           stock: data.stock ?? 0,
           status: data.status ?? 0,
@@ -148,6 +157,7 @@ export class CatalogService {
           ...(data.images !== undefined ? { images: data.images as never } : {}),
           ...(data.details !== undefined ? { details: data.details as never } : {}),
           ...(data.price !== undefined ? { price: BigInt(data.price) } : {}),
+          ...(data.pv !== undefined ? { pv: BigInt(this.validatePv(data.pv)) } : {}),
           ...(data.originalPrice !== undefined ? { originalPrice: BigInt(data.originalPrice) } : {}),
           ...(data.stock !== undefined ? { stock: data.stock } : {}),
           ...(data.status !== undefined ? { status: data.status } : {}),

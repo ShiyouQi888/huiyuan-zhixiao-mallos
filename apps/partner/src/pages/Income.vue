@@ -128,7 +128,7 @@ onMounted(load);
     <div v-else style="margin-top: 10px">
       <EmptyState
         title="暂无收益记录"
-        description="团队业绩结算后，各条收益线会按日写入记录"
+        description="团队PV结算后，各条收益线会按日写入记录"
         :icon="Wallet"
       />
     </div>

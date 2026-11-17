@@ -73,7 +73,7 @@ export interface ExcludedLine {
 /**
  * 每位上级分别剔除自己伞下业绩最大的一条直推线。
  * - 候选条件：该上级至少有 2 条直接下线（单线独苗不参与剔除）；
- * - ratio > 0 时，还需最大线占该上级伞下当日业绩的比例超过阈值；
+ * - ratio > 0 时，还需最大线占该上级伞下当日PV的比例超过阈值；
  * - 业绩并列时取 childId 较小者，确保结果确定。
  */
 export function selectMaxExcludedLines(
@@ -105,7 +105,7 @@ export function selectMaxExcludedLines(
   return excluded;
 }
 
-/** 团队奖有效基数：伞下当日业绩减去被剔除线的子树业绩 */
+/** 团队奖有效基数：伞下当日PV减去被剔除线的子树PV */
 export function effectiveTeamBase(
   teamAmount: bigint,
   children: Array<{ id: bigint; teamAmount: bigint }>,

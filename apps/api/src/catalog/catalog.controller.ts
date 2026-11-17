@@ -110,7 +110,7 @@ export class CatalogController {
   private toProductInput(body: any, partial = false): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     const str = ['name', 'subtitle', 'description'];
-    const num = ['price', 'originalPrice', 'stock', 'status', 'sort'];
+    const num = ['price', 'pv', 'originalPrice', 'stock', 'status', 'sort'];
     const bool = ['isNew', 'isFeatured'];
     for (const k of str) if (body[k] !== undefined) out[k] = body[k];
     for (const k of num) if (body[k] !== undefined) out[k] = Number(body[k]);

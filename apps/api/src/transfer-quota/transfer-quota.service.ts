@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 type Tx = Prisma.TransactionClient;
 
-/** 档位赋予的权益通；记录会员间钱包转出与商城钱包消费的已用金额。 */
+/** 档位赋予的权益通；仅记录会员间钱包转出的已用额度。 */
 @Injectable()
 export class TransferQuotaService {
   constructor(private readonly prisma: PrismaService) {}
@@ -152,47 +152,6 @@ export class TransferQuotaService {
         balanceAfter: this.remaining({ ...account, reserved: nextReserved }),
         bizType, bizId: transferNo, remark: '钱包转账待确认，额度预占',
       },
-    });
-  }
-
-  /** 商城商品订单以钱包支付时按实际扣款全额记入消耗；可用权益通最低为 0。 */
-  async consumeWalletSpend(userId: bigint, amount: bigint, orderNo: string, transaction: Tx) {
-    if (amount <= 0n) return;
-    const bizType = 'wallet_product_spend';
-    const duplicate = await transaction.transferQuotaTransaction.findUnique({
-      where: { bizType_bizId: { bizType, bizId: orderNo } },
-    });
-    if (duplicate) return;
-
-    const user = await transaction.user.findUnique({ where: { id: userId }, select: { packageId: true } });
-    if (!user?.packageId) return;
-
-    const account = await this.ensure(userId, transaction);
-    const available = this.remaining(account);
-    if (amount > available) {
-      throw Err.conflict(`商城消费将超过可用权益通（当前可用 ${available.toLocaleString('zh-CN')} 元），请调整订单金额后重试`);
-    }
-    const used = account.used + amount;
-    const updated = await transaction.transferQuotaAccount.updateMany({
-      where: { userId, version: account.version },
-      data: { used, version: { increment: 1 } },
-    });
-    if (!updated.count) throw new BusinessException(3002, '权益通并发冲突，请重试');
-
-    await transaction.transferQuotaTransaction.create({
-      data: {
-        userId,
-        type: 6,
-        changeAmount: -amount,
-        balanceAfter: this.remaining({ ...account, used }),
-        bizType,
-        bizId: orderNo,
-        remark: `商城订单 ${orderNo} 钱包消费，消耗权益通 ${amount} 元`,
-      },
-    });
-    await transaction.user.updateMany({
-      where: { id: userId, packageId: { not: null } },
-      data: { transferQuotaStatus: account.granted - account.adjustedOut <= used ? 1 : 0 },
     });
   }
 

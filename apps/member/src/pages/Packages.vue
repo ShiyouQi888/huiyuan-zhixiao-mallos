@@ -42,8 +42,8 @@ const selectedAmount = computed(() => selected.value?.mode === 'upgrade'
   ? Number(selected.value.item.price) - Number(currentPackage.value?.price ?? 0)
   : Number(selected.value?.item.price ?? 0));
 const selectedQuota = computed(() => selected.value?.mode === 'upgrade'
-  ? Number(selected.value.item.transferQuota) - Number(currentPackage.value?.transferQuota ?? 0)
-  : Number(selected.value?.item.transferQuota ?? 0));
+  ? Math.max(0, Number(selected.value.item.pv ?? 0) - Number(currentPackage.value?.pv ?? 0)) * 3
+  : Number(selected.value?.item.pv ?? 0) * 3);
 const visiblePackages = computed(() => packages.value.filter((item) => {
   if (!profile.value?.packageId) return actionModes.value.includes('purchase');
   const currentLevel = Number(currentPackage.value?.level ?? 0);
@@ -52,7 +52,7 @@ const visiblePackages = computed(() => packages.value.filter((item) => {
 }));
 const profileStatusLabel = computed(() => {
   if (!currentPackage.value) return '尚未开通会员档位';
-  return profile.value?.transferQuotaAccount?.repurchaseRequired ? '权益通已用完 · 复消可解锁' : '权益通可用';
+  return profile.value?.transferQuotaAccount?.repurchaseRequired ? '权益通已用完 · 复消商品或礼包可解锁' : '权益通可用';
 });
 const canUseBalance = computed(() => store.has('wallet.account'));
 
@@ -94,6 +94,7 @@ async function buy() {
       packageId: selected.value.item.id,
       useBalance: useBalance.value,
     });
+    await store.loadProfile().catch(() => {});
     Toast(`${selectedModeLabel.value}订单 ${order.orderNo} 已创建`, 'success');
     selected.value = null;
     router.push('/orders');
@@ -139,10 +140,10 @@ async function buy() {
           <div class="package-mark"><Sparkles :size="19" aria-hidden="true" /></div>
         </div>
         <div class="package-price">¥{{ money(item.price) }}</div>
-        <div class="package-duration">有效期 {{ item.durationDays }} 天</div>
+        <div class="package-duration">有效期 {{ item.durationDays }} 天 · 计酬 PV {{ Number(item.pv ?? 0).toLocaleString('zh-CN') }}</div>
         <div class="package-benefit">
           <div><BadgeCheck :size="15" aria-hidden="true" /> 权益通</div>
-          <strong>{{ money(item.transferQuota) }}</strong>
+          <strong>{{ money(Number(item.pv ?? 0) * 3) }}</strong>
         </div>
         <section class="package-products" :aria-label="`${item.name}关联商品`">
           <div class="package-products-heading">
@@ -175,19 +176,19 @@ async function buy() {
       </article>
     </div>
     <EmptyState v-else-if="!loading && !loadError" title="当前没有可执行的档位操作"
-      :description="currentPackage ? '当前权益通仍可用，或已处于最高可升级档位。权益通用完后可复消解锁。' : '暂无可开通的档位，请联系平台运营人员。'"
+      :description="currentPackage ? '当前权益通仍可用，或已处于最高可升级档位。权益通用完后可复消礼包或普通商品解锁。' : '暂无可开通的档位，请联系平台运营人员。'"
       action-label="返回商城" @action="router.push('/')" />
     <EmptyState v-else-if="loadError" title="档位信息暂时无法加载" :description="loadError" action-label="重新加载" @action="load" />
 
     <div class="package-note">
       <BadgeCheck :size="15" aria-hidden="true" />
-      <span>钱包余额用于商城消费与会员间转账；钱包转出和商城商品消费会计入权益通消耗，超额消费会抵算后续复消新增额度；会员卡购买、升级与复消不消耗权益通。</span>
+      <span>权益通只在钱包转出时消耗。礼包新购与复消按档位PV × 3发放，升级按PV差额 × 3补充；会员普通商品订单支付成功后按订单PV × 3发放。</span>
     </div>
 
     <AppModal v-model="confirmOpen" eyebrow="订单确认" :title="`${selectedModeLabel} · ${selected?.item.name ?? ''}`"
       description="核对本次订单金额与新增权益通后提交订单。" :confirm-loading="busy"
       :confirm-text="`确认提交 · ¥${money(selectedAmount)}`"
-      :hint="selected?.mode === 'upgrade' ? '升级按新旧档位差额计价，并补充两个档位之间的权益通差额。' : selected?.mode === 'repurchase' ? '复消按所选档位金额下单，完成后将该档位权益通追加到账户。' : '订单金额由钱包余额抵扣；完成后按所选档位获得权益通。'" @confirm="buy">
+      :hint="selected?.mode === 'upgrade' ? '支付成功后按新旧档位PV差额 × 3补充权益通。' : selected?.mode === 'repurchase' ? '支付成功后按所选档位PV × 3追加权益通。' : '支付成功后按所选档位PV × 3增加权益通。'" @confirm="buy">
       <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '档位差额' : '档位金额' }}</span><strong>¥{{ money(selectedAmount) }}</strong></div>
       <div class="order-summary-row"><span>{{ selected?.mode === 'upgrade' ? '补充权益通' : '新增权益通' }}</span><strong class="green">{{ money(selectedQuota) }}</strong></div>
       <div v-if="selected?.mode === 'upgrade'" class="order-summary-row"><span>升级后档位</span><strong>{{ selected?.item.name }}</strong></div>

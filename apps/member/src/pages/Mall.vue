@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, money, resolveAssetUrl } from '../api';
 import { useUserStore } from '../stores/user';
+import { useBrandStore } from '../stores/brand';
 import SectionHeading from '../components/SectionHeading.vue';
 import ProductCard from '../components/ProductCard.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -14,6 +15,7 @@ import { applyThemeMode, getThemeMode, type ThemeMode } from '../theme';
 
 const router = useRouter();
 const store = useUserStore();
+const brand = useBrandStore();
 const products = ref<any[]>([]);
 const packages = ref<any[]>([]);
 const keyword = ref('');
@@ -90,7 +92,13 @@ function categoryTone(index: number) {
   <main class="page page--store">
     <section class="home-intro">
       <div class="home-hello">
-        <small>太阳线会员 · 欢迎回来</small>
+        <small class="home-brand-line">
+          <span class="home-brand-mark">
+            <img v-if="brand.settings.logoUrl" :src="resolveAssetUrl(brand.settings.logoUrl)" alt="" aria-hidden="true" />
+            <Sun v-else :size="12" aria-hidden="true" />
+          </span>
+          <span>{{ brand.settings.brandName }} · {{ brand.settings.tagline || '欢迎回来' }}</span>
+        </small>
         <strong>Hi，{{ greetingName }}</strong>
       </div>
       <div class="home-intro-actions">
@@ -212,6 +220,10 @@ function categoryTone(index: number) {
 </template>
 
 <style scoped>
+.home-hello .home-brand-line { display: flex; min-width: 0; align-items: center; gap: 5px; }
+.home-brand-mark { display: inline-flex; width: 17px; height: 17px; flex: 0 0 auto; align-items: center; justify-content: center; overflow: hidden; border-radius: 5px; background: var(--brand-soft); color: var(--brand); }
+.home-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+.home-brand-line > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-intro-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .home-theme-button {
   display: inline-flex;
