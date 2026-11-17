@@ -1,6 +1,8 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Order as PrismaOrder, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { BonusService } from '../bonus/bonus.service';
+import { allocateDirectStages, splitDirectBonus } from '../bonus/direct-plan';
 import { BusinessException, Err } from '../common/business.exception';
 import { ConfigService } from '../config/config.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,6 +28,7 @@ export class OrderService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly transferQuota: TransferQuotaService,
     private readonly wallet: WalletService,
+    private readonly bonus: BonusService,
     private readonly config: ConfigService,
   ) {}
 
@@ -117,6 +120,12 @@ export class OrderService implements OnModuleInit {
       const total = BigInt(Math.round(Number(order.pvAmount) * rate));
       const periods = Number(pkg.directReleaseDays ?? await this.config.getNumber('bonus.direct_periods', 20));
       if (total > 0n) {
+        // 直推奖分配：**先拆，后分期**。
+        // 1) 先按 bonus.cash_ratio 拆出现金部分（分期释放）与太阳值部分（一次性入账）；
+        // 2) 现金部分再均分到各期，余数补最后一期，保证 Σ各期 === 现金部分。
+        const cashRatio = await this.config.getNumber('bonus.cash_ratio', 0.7);
+        const { cashTotal, tokenTotal } = splitDirectBonus(total, cashRatio);
+        const stageAmounts = allocateDirectStages(cashTotal, periods);
         const startAt = new Date(paidAt);
         startAt.setUTCHours(0, 0, 0, 0);
         startAt.setUTCDate(startAt.getUTCDate() + 1);
@@ -124,18 +133,33 @@ export class OrderService implements OnModuleInit {
           data: {
             orderId: order.id,
             beneficiaryId: order.parentIdSnapshot,
-            totalAmount: total,
-            dailyAmount: total / BigInt(periods),
+            // 计划总额只统计「参与分期释放的现金部分」，太阳值不占用分期额度
+            totalAmount: cashTotal,
+            dailyAmount: cashTotal / BigInt(periods),
             periods,
             status: 'PENDING',
             startAt,
+            splitAt: new Date(),
           },
         });
+        if (tokenTotal > 0n) {
+          // 太阳值部分支付成功即到账（不参与分期），按 planId 幂等
+          await this.bonus.creditDirectTokenPortion(
+            {
+              userId: order.parentIdSnapshot,
+              amount: tokenTotal,
+              settleDate: paidAt,
+              sourceOrderId: order.id,
+              planId: plan.id,
+            },
+            tx,
+          );
+        }
         for (let i = 1; i <= periods; i++) {
           const dueAt = new Date(startAt);
           dueAt.setUTCDate(dueAt.getUTCDate() + i - 1);
           await tx.bonusStage.create({
-            data: { planId: plan.id, periodNo: i, amount: total / BigInt(periods), dueAt, status: 'PENDING' },
+            data: { planId: plan.id, periodNo: i, amount: stageAmounts[i - 1], dueAt, status: 'PENDING' },
           });
         }
       }

@@ -229,6 +229,10 @@ export class SettlementService {
         sourceOrderId: stage.plan.orderId,
         planId: stage.plan.id,
         stageId: stage.id,
+        // 先拆后分期：太阳值部分已在计划创建时一次性入账，
+        // 分期阶段发放的就是现金全额，不能再二次按 cash_ratio 拆分。
+        // 历史计划（splitAt 为空）仍是全额分期，保持逐期拆分以免重复发放太阳值。
+        cashOnly: stage.plan.splitAt !== null,
         idempotencyKey: `direct:${stage.id}`,
       });
       await this.prisma.bonusStage.update({
@@ -506,6 +510,23 @@ export class SettlementService {
         && account.user.transferQuotaStatus === status;
     });
 
+    const [plans, stageSums, releasedSums] = await Promise.all([
+      this.prisma.bonusPlan.findMany({ select: { id: true, totalAmount: true, releasedAmount: true, splitAt: true } }),
+      this.prisma.bonusStage.groupBy({ by: ['planId'], _sum: { amount: true } }),
+      this.prisma.bonusStage.groupBy({ by: ['planId'], where: { status: 'RELEASED' }, _sum: { amount: true } }),
+    ]);
+    const stageSumByPlan = new Map(stageSums.map((row) => [row.planId.toString(), row._sum.amount ?? 0n]));
+    const releasedByPlan = new Map(releasedSums.map((row) => [row.planId.toString(), row._sum.amount ?? 0n]));
+    // 直推奖计划自洽：各期之和 = 计划总额（整数除法余数必须补进末期，否则静默少发）；
+    // 已释放金额 = 已释放各期之和。
+    // 「Σ各期 = 总额」只对新规则计划（splitAt 非空）成立：历史计划的期次已全部释放、
+    // 金额无法回改，其少付差异由 scripts/backfill-direct-plan.ts 输出补偿清单。
+    const directPlanConsistent = plans.every((plan) => {
+      const id = plan.id.toString();
+      const stageMatched = plan.splitAt === null || (stageSumByPlan.get(id) ?? 0n) === plan.totalAmount;
+      return stageMatched && (releasedByPlan.get(id) ?? 0n) === plan.releasedAmount;
+    });
+
     const checks = [
       { name: '奖金现金 = 钱包奖金流水', ok: cashBonus === (walletType1._sum.changeAmount ?? 0n) },
       { name: '奖金太阳值 = 太阳值批次', ok: tokenBonus === (tokenLots._sum.amount ?? 0n) },
@@ -513,6 +534,7 @@ export class SettlementService {
         detail: { flow: (walletSum._sum.changeAmount ?? 0n).toString(), balance: walletTotal.toString() } },
       { name: '分红合计 ≤ 分红池总额', ok: (dividendSum._sum.amount ?? 0n) <= (poolSum._sum.poolAmount ?? 0n) },
       { name: '权益通已用/预占 = 钱包转账统计', ok: quotaConsistent },
+      { name: '直推奖计划：Σ各期 = 计划总额', ok: directPlanConsistent },
     ];
     return { statDate: d.toISOString().slice(0, 10), checks, allPassed: checks.every((c) => c.ok) };
   }

@@ -9,9 +9,9 @@ const PAGE_SIZE = 20;
 
 const STATUS_META: Record<string, { label: string; tone: 'brand' | 'success' | 'warning' | 'info' | 'neutral' }> = {
   PENDING: { label: '待释放', tone: 'neutral' },
-  RUNNING: { label: '释放中', tone: 'brand' },
+  RELEASING: { label: '释放中', tone: 'brand' },
   COMPLETED: { label: '已释放完', tone: 'success' },
-  PAUSED: { label: '已暂停', tone: 'warning' },
+  CANCELLED: { label: '已取消', tone: 'warning' },
 };
 
 export function BonusPlans() {
@@ -40,7 +40,7 @@ export function BonusPlans() {
     <Card className="overflow-hidden">
       <CardHeader
         title="直推奖计划"
-        description="按订单生成的分期释放计划，每期到账金额与进度"
+        description="直推奖先按现金 / 太阳值拆分：太阳值支付即到账，现金部分按下列计划分期释放"
         icon={<CalendarClock size={15} />}
         action={(
           <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
@@ -63,9 +63,9 @@ export function BonusPlans() {
                 <th className="th">收益人</th>
                 <th className="th">订单号</th>
                 <th className="th text-right">订单金额</th>
-                <th className="th text-right">每期金额</th>
+                <th className="th text-right">每期现金</th>
                 <th className="th text-center">期数</th>
-                <th className="th w-[160px]">释放进度</th>
+                <th className="th w-[160px]">现金释放进度</th>
                 <th className="th">状态</th>
               </tr>
             </thead>

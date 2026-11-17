@@ -461,6 +461,8 @@ model BonusPlan {
   /// PENDING / RELEASING / COMPLETED / CANCELLED
   status          String   @default("PENDING") @db.VarChar(16)
   startAt         DateTime
+  /// 直推奖「先拆后分期」的拆分完成时间；为空表示历史计划（全额分期、逐期再拆）
+  splitAt         DateTime?
   createdAt       DateTime @default(now())
 
   order           Order         @relation(fields: [orderId], references: [id])

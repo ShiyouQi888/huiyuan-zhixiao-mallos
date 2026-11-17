@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BonusRecord } from '@prisma/client';
+import { BonusRecord, Prisma } from '@prisma/client';
 import { Err } from '../common/business.exception';
 import { ConfigService } from '../config/config.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,11 @@ export interface CreditBonusParams {
   sourceOrderId?: bigint | null;
   planId?: bigint | null;
   stageId?: bigint | null;
+  /**
+   * 直推奖「先拆后分期」：太阳值部分已在计划创建时一次性入账，
+   * 分期释放的每期金额即为现金全额，不再二次拆分。
+   */
+  cashOnly?: boolean;
   /** 幂等键，由调用方按业务构造，例 team:<uid>:<source>:<date> */
   idempotencyKey: string;
 }
@@ -43,8 +48,10 @@ export class BonusService {
       }
 
       const cashRatio = await this.config.getNumber('bonus.cash_ratio', 0.7);
-      const cashAmount = BigInt(Math.round(Number(params.amount) * cashRatio));
-      const tokenAmount = params.amount - cashAmount;
+      const cashAmount = params.cashOnly
+        ? params.amount
+        : BigInt(Math.round(Number(params.amount) * cashRatio));
+      const tokenAmount = params.cashOnly ? 0n : params.amount - cashAmount;
 
       const wallet = await tx.wallet.upsert({
         where: { userId: params.userId },
@@ -91,6 +98,46 @@ export class BonusService {
       }
       return record;
     });
+  }
+
+  /**
+   * 直推奖「先拆」：计划创建时一次性把太阳值部分入账（不分期）。
+   * 只增减太阳值，不产生钱包流水，因此 `walletTransactionId` 为空。
+   */
+  async creditDirectTokenPortion(
+    params: {
+      userId: bigint;
+      amount: bigint;
+      settleDate: Date;
+      sourceOrderId?: bigint | null;
+      planId?: bigint | null;
+    },
+    transaction?: Prisma.TransactionClient,
+  ): Promise<BonusRecord | null> {
+    if (params.amount <= 0n) return null;
+    const apply = async (tx: Prisma.TransactionClient) => {
+      if (params.planId) {
+        const dup = await tx.bonusRecord.findFirst({
+          where: { planId: params.planId, type: 1, stageId: null },
+        });
+        if (dup) return dup;
+      }
+      const record = await tx.bonusRecord.create({
+        data: {
+          userId: params.userId,
+          type: 1,
+          amount: params.amount,
+          cashAmount: 0n,
+          tokenAmount: params.amount,
+          sourceOrderId: params.sourceOrderId ?? null,
+          planId: params.planId ?? null,
+          settleDate: params.settleDate,
+        },
+      });
+      await this.token.credit(params.userId, params.amount, record.id, tx);
+      return record;
+    };
+    return transaction ? apply(transaction) : this.prisma.$transaction(apply);
   }
 
   /** 收益汇总 */
